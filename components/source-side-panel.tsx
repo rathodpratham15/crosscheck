@@ -45,6 +45,11 @@ export function SourceSidePanel({
 
   const isOpen = source !== null;
 
+  // Only mount the panel + backdrop when there's something to show or slide
+  // out. Mounting an always-present <aside translate-x-full> off-screen would
+  // extend the document's scroll width and break mobile layout.
+  if (!displayed) return null;
+
   return (
     <>
       <div
@@ -64,8 +69,7 @@ export function SourceSidePanel({
           (isOpen ? "translate-x-0" : "translate-x-full")
         }
       >
-        {displayed && (
-          <div className="flex h-full flex-col">
+        <div className="flex h-full flex-col">
             <header className="mb-4 flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold dark:bg-zinc-800">
@@ -99,8 +103,7 @@ export function SourceSidePanel({
             >
               Open original ↗
             </a>
-          </div>
-        )}
+        </div>
       </aside>
     </>
   );

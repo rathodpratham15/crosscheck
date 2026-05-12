@@ -10,10 +10,10 @@ type SourceStripProps = {
   getStatus?: (id: number) => CitationStatus | undefined;
 };
 
-const STATUS_DOT: Record<CitationStatus, string> = {
-  checking: "bg-zinc-400 animate-pulse",
-  verified: "bg-emerald-500",
-  unsupported: "bg-amber-500",
+const STATUS_BADGE: Record<CitationStatus, { bg: string; symbol: string }> = {
+  checking: { bg: "bg-zinc-400 animate-pulse", symbol: "" },
+  verified: { bg: "bg-emerald-500", symbol: "✓" },
+  unsupported: { bg: "bg-amber-500", symbol: "!" },
 };
 
 export function SourceStrip({
@@ -25,7 +25,7 @@ export function SourceStrip({
   if (sources.length === 0) return null;
 
   return (
-    <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-zinc-200 px-4 pb-3 dark:border-zinc-800">
+    <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-zinc-200 px-4 pb-3 scrollbar-none [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
       {sources.map((s) => {
         const isSelected = s.id === selectedId;
         const status = getStatus?.(s.id);
@@ -56,8 +56,13 @@ export function SourceStrip({
             {status && (
               <span
                 aria-label={`verification ${status}`}
-                className={"h-1.5 w-1.5 shrink-0 rounded-full " + STATUS_DOT[status]}
-              />
+                className={
+                  "flex h-3 w-3 shrink-0 items-center justify-center rounded-full text-[8px] leading-none font-bold text-white " +
+                  STATUS_BADGE[status].bg
+                }
+              >
+                {STATUS_BADGE[status].symbol}
+              </span>
             )}
           </button>
         );

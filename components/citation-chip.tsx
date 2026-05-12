@@ -8,10 +8,10 @@ type CitationChipProps = {
   onClick?: () => void;
 };
 
-const STATUS_DOT: Record<CitationStatus, string> = {
-  checking: "bg-zinc-400 animate-pulse",
-  verified: "bg-emerald-500",
-  unsupported: "bg-amber-500",
+const STATUS_BADGE: Record<CitationStatus, { bg: string; symbol: string }> = {
+  checking: { bg: "bg-zinc-400 animate-pulse", symbol: "" },
+  verified: { bg: "bg-emerald-500", symbol: "✓" },
+  unsupported: { bg: "bg-amber-500", symbol: "!" },
 };
 
 export function CitationChip({ n, status, onClick }: CitationChipProps) {
@@ -33,10 +33,12 @@ export function CitationChip({ n, status, onClick }: CitationChipProps) {
         <span
           aria-hidden="true"
           className={
-            "pointer-events-none absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-white dark:ring-zinc-950 " +
-            STATUS_DOT[status]
+            "pointer-events-none absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full text-[8px] leading-none font-bold text-white ring-2 ring-white dark:ring-zinc-950 " +
+            STATUS_BADGE[status].bg
           }
-        />
+        >
+          {STATUS_BADGE[status].symbol}
+        </span>
       )}
     </span>
   );

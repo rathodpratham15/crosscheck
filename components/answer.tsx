@@ -84,7 +84,7 @@ export function Answer({
     walkChildren(children, onCitationClick, lookup);
 
   return (
-    <div className="text-sm leading-6 text-zinc-900 dark:text-zinc-100">
+    <div className="min-w-0 text-sm leading-6 wrap-break-word text-zinc-900 dark:text-zinc-100">
       <Markdown
         remarkPlugins={[remarkGfm]}
         components={{
