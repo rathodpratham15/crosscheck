@@ -12,7 +12,7 @@ Crosscheck is an AI research tool that verifies whether AI-generated answers are
 
 ### Live URL
 
-https://crosscheck.pratham.click/
+<https://crosscheck.pratham.click/>
 
 ---
 
