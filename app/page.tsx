@@ -1,18 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import { Answer } from "@/components/answer";
+import type { Source } from "@/lib/tavily";
+
+type ServerEvent =
+  | { type: "sources"; sources: Source[] }
+  | { type: "delta"; text: string }
+  | { type: "error"; message: string };
 
 export default function Home() {
   const [query, setQuery] = useState("");
   const [answer, setAnswer] = useState("");
+  const [sources, setSources] = useState<Source[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleSubmit() {
     if (!query.trim() || isStreaming) return;
 
     setAnswer("");
+    setSources([]);
     setError(null);
     setIsStreaming(true);
 
@@ -30,10 +38,34 @@ export default function Home() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = "";
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        setAnswer((prev) => prev + decoder.decode(value, { stream: true }));
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, newlineIdx);
+          buffer = buffer.slice(newlineIdx + 1);
+          if (!line.trim()) continue;
+
+          let event: ServerEvent;
+          try {
+            event = JSON.parse(line) as ServerEvent;
+          } catch {
+            continue;
+          }
+
+          if (event.type === "sources") {
+            setSources(event.sources);
+          } else if (event.type === "delta") {
+            setAnswer((prev) => prev + event.text);
+          } else if (event.type === "error") {
+            setError(event.message);
+          }
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -41,6 +73,13 @@ export default function Home() {
       setIsStreaming(false);
     }
   }
+
+  function handleCitationClick(id: number) {
+    // Stub — wired to the SourceSidePanel in slice 2c
+    console.log("citation clicked:", id);
+  }
+
+  const hasResult = answer.length > 0 || sources.length > 0;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16">
@@ -51,7 +90,13 @@ export default function Home() {
         </p>
       </header>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void handleSubmit();
+        }}
+        className="flex flex-col gap-3"
+      >
         <textarea
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -77,10 +122,10 @@ export default function Home() {
         </div>
       )}
 
-      {answer && (
-        <article className="whitespace-pre-wrap rounded-lg border border-zinc-200 bg-white px-4 py-4 text-sm leading-6 dark:border-zinc-800 dark:bg-zinc-950">
-          {answer}
-        </article>
+      {hasResult && (
+        <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <Answer text={answer} onCitationClick={handleCitationClick} />
+        </section>
       )}
     </main>
   );
