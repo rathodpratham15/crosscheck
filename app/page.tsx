@@ -2,13 +2,24 @@
 
 import { useState } from "react";
 import { Answer } from "@/components/answer";
-import { SourceSidePanel } from "@/components/source-side-panel";
+import type { CitationStatus } from "@/components/citation-chip";
+import {
+  SourceSidePanel,
+  type VerificationDisplay,
+} from "@/components/source-side-panel";
 import { SourceStrip } from "@/components/source-strip";
 import type { Source } from "@/lib/tavily";
 
 type ServerEvent =
   | { type: "sources"; sources: Source[] }
   | { type: "delta"; text: string }
+  | { type: "verification-start"; citationIds: number[] }
+  | {
+      type: "verification";
+      citationId: number;
+      status: "verified" | "unsupported";
+      reason: string;
+    }
   | { type: "error"; message: string };
 
 export default function Home() {
@@ -16,6 +27,9 @@ export default function Home() {
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
+  const [verifications, setVerifications] = useState<
+    Record<number, VerificationDisplay>
+  >({});
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,6 +39,7 @@ export default function Home() {
     setAnswer("");
     setSources([]);
     setSelectedSourceId(null);
+    setVerifications({});
     setError(null);
     setIsStreaming(true);
 
@@ -66,6 +81,22 @@ export default function Home() {
             setSources(event.sources);
           } else if (event.type === "delta") {
             setAnswer((prev) => prev + event.text);
+          } else if (event.type === "verification-start") {
+            setVerifications((prev) => {
+              const next = { ...prev };
+              for (const id of event.citationIds) {
+                next[id] = { status: "checking" };
+              }
+              return next;
+            });
+          } else if (event.type === "verification") {
+            setVerifications((prev) => ({
+              ...prev,
+              [event.citationId]: {
+                status: event.status,
+                reason: event.reason,
+              },
+            }));
           } else if (event.type === "error") {
             setError(event.message);
           }
@@ -81,6 +112,10 @@ export default function Home() {
   const hasResult = answer.length > 0 || sources.length > 0;
   const selectedSource =
     sources.find((s) => s.id === selectedSourceId) ?? null;
+  const getStatus = (id: number): CitationStatus | undefined =>
+    verifications[id]?.status;
+  const selectedVerification =
+    selectedSource ? verifications[selectedSource.id] : undefined;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16">
@@ -129,13 +164,19 @@ export default function Home() {
             sources={sources}
             selectedId={selectedSourceId}
             onSelect={setSelectedSourceId}
+            getStatus={getStatus}
           />
-          <Answer text={answer} onCitationClick={setSelectedSourceId} />
+          <Answer
+            text={answer}
+            onCitationClick={setSelectedSourceId}
+            getCitationStatus={getStatus}
+          />
         </section>
       )}
 
       <SourceSidePanel
         source={selectedSource}
+        verification={selectedVerification}
         onClose={() => setSelectedSourceId(null)}
       />
     </main>

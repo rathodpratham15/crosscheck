@@ -1,20 +1,34 @@
 "use client";
 
 import type { Source } from "@/lib/tavily";
+import type { CitationStatus } from "./citation-chip";
 
 type SourceStripProps = {
   sources: Source[];
   selectedId: number | null;
   onSelect: (id: number) => void;
+  getStatus?: (id: number) => CitationStatus | undefined;
 };
 
-export function SourceStrip({ sources, selectedId, onSelect }: SourceStripProps) {
+const STATUS_DOT: Record<CitationStatus, string> = {
+  checking: "bg-zinc-400 animate-pulse",
+  verified: "bg-emerald-500",
+  unsupported: "bg-amber-500",
+};
+
+export function SourceStrip({
+  sources,
+  selectedId,
+  onSelect,
+  getStatus,
+}: SourceStripProps) {
   if (sources.length === 0) return null;
 
   return (
     <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-zinc-200 px-4 pb-3 dark:border-zinc-800">
       {sources.map((s) => {
         const isSelected = s.id === selectedId;
+        const status = getStatus?.(s.id);
         return (
           <button
             key={s.id}
@@ -38,7 +52,13 @@ export function SourceStrip({ sources, selectedId, onSelect }: SourceStripProps)
             >
               {s.id}
             </span>
-            <span className="max-w-[12rem] truncate">{s.title}</span>
+            <span className="max-w-48 truncate">{s.title}</span>
+            {status && (
+              <span
+                aria-label={`verification ${status}`}
+                className={"h-1.5 w-1.5 shrink-0 rounded-full " + STATUS_DOT[status]}
+              />
+            )}
           </button>
         );
       })}

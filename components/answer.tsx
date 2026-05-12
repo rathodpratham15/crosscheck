@@ -9,13 +9,16 @@ import {
 } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CitationChip } from "./citation-chip";
+import { CitationChip, type CitationStatus } from "./citation-chip";
 
 const CITATION_REGEX = /\[(\d+)\]/g;
+
+type StatusLookup = (id: number) => CitationStatus | undefined;
 
 function splitTextWithCitations(
   text: string,
   onCite: (id: number) => void,
+  getStatus: StatusLookup,
 ): ReactNode {
   const parts: ReactNode[] = [];
   let lastIndex = 0;
@@ -29,6 +32,7 @@ function splitTextWithCitations(
       <CitationChip
         key={`cite-${chipIndex++}-${n}-${offset}`}
         n={n}
+        status={getStatus(n)}
         onClick={() => onCite(n)}
       />,
     );
@@ -43,13 +47,14 @@ function splitTextWithCitations(
 function walkChildren(
   children: ReactNode,
   onCite: (id: number) => void,
+  getStatus: StatusLookup,
 ): ReactNode {
   if (typeof children === "string") {
-    return splitTextWithCitations(children, onCite);
+    return splitTextWithCitations(children, onCite, getStatus);
   }
   if (Array.isArray(children)) {
     return children.map((child, i) => (
-      <Fragment key={i}>{walkChildren(child, onCite)}</Fragment>
+      <Fragment key={i}>{walkChildren(child, onCite, getStatus)}</Fragment>
     ));
   }
   if (isValidElement(children)) {
@@ -57,7 +62,7 @@ function walkChildren(
     return cloneElement(
       element,
       undefined,
-      walkChildren(element.props.children, onCite),
+      walkChildren(element.props.children, onCite, getStatus),
     );
   }
   return children;
@@ -66,10 +71,17 @@ function walkChildren(
 type AnswerProps = {
   text: string;
   onCitationClick: (id: number) => void;
+  getCitationStatus?: StatusLookup;
 };
 
-export function Answer({ text, onCitationClick }: AnswerProps) {
-  const walk = (children: ReactNode) => walkChildren(children, onCitationClick);
+export function Answer({
+  text,
+  onCitationClick,
+  getCitationStatus,
+}: AnswerProps) {
+  const lookup: StatusLookup = getCitationStatus ?? (() => undefined);
+  const walk = (children: ReactNode) =>
+    walkChildren(children, onCitationClick, lookup);
 
   return (
     <div className="text-sm leading-6 text-zinc-900 dark:text-zinc-100">

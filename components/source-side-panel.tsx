@@ -2,13 +2,24 @@
 
 import { useEffect, useState } from "react";
 import type { Source } from "@/lib/tavily";
+import type { CitationStatus } from "./citation-chip";
+
+export type VerificationDisplay = {
+  status: CitationStatus;
+  reason?: string;
+};
 
 type SourceSidePanelProps = {
   source: Source | null;
+  verification?: VerificationDisplay;
   onClose: () => void;
 };
 
-export function SourceSidePanel({ source, onClose }: SourceSidePanelProps) {
+export function SourceSidePanel({
+  source,
+  verification,
+  onClose,
+}: SourceSidePanelProps) {
   // Keep a copy of the last shown source so content stays visible during slide-out.
   const [displayed, setDisplayed] = useState<Source | null>(source);
   if (source && source !== displayed) {
@@ -76,6 +87,7 @@ export function SourceSidePanel({ source, onClose }: SourceSidePanelProps) {
             <p className="mb-4 break-all text-xs text-zinc-500">
               {displayed.url}
             </p>
+            {verification && <VerificationBanner verification={verification} />}
             <p className="mb-6 text-sm leading-6 text-zinc-700 dark:text-zinc-300">
               {displayed.snippet}
             </p>
@@ -91,5 +103,44 @@ export function SourceSidePanel({ source, onClose }: SourceSidePanelProps) {
         )}
       </aside>
     </>
+  );
+}
+
+function VerificationBanner({
+  verification,
+}: {
+  verification: VerificationDisplay;
+}) {
+  if (verification.status === "checking") {
+    return (
+      <div className="mb-4 flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-zinc-400" />
+        Verifying citation against source…
+      </div>
+    );
+  }
+  if (verification.status === "verified") {
+    return (
+      <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
+        <div className="mb-0.5 flex items-center gap-1.5 font-semibold">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          Verified
+        </div>
+        {verification.reason && (
+          <p className="leading-5 opacity-90">{verification.reason}</p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+      <div className="mb-0.5 flex items-center gap-1.5 font-semibold">
+        <span className="h-2 w-2 rounded-full bg-amber-500" />
+        Unsupported
+      </div>
+      {verification.reason && (
+        <p className="leading-5 opacity-90">{verification.reason}</p>
+      )}
+    </div>
   );
 }

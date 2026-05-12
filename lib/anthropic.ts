@@ -1,7 +1,15 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { z } from "zod";
 import type { Source } from "./tavily";
 
 export const RESEARCH_MODEL = anthropic("claude-sonnet-4-6");
+export const VERIFIER_MODEL = anthropic("claude-haiku-4-5-20251001");
+
+export const VerificationSchema = z.object({
+  status: z.enum(["verified", "unsupported"]),
+  reason: z.string(),
+});
+export type Verification = z.infer<typeof VerificationSchema>;
 
 const SYSTEM_INSTRUCTION = `You are a research assistant for AI/ML topics. You are given a question and a numbered list of source snippets from academic sources (arxiv, Semantic Scholar, Papers with Code, GitHub).
 
@@ -23,5 +31,24 @@ export function buildResearchPrompt(query: string, sources: Source[]) {
   return {
     system: SYSTEM_INSTRUCTION,
     user: `Question: ${query}\n\n---\n\nSources:\n${sourcesBlock}`,
+  };
+}
+
+const VERIFIER_INSTRUCTION = `You are a strict citation verifier. You receive a research answer that contains numbered citations like [N], and a single cited source with its content. Your job: locate the claims in the answer that cite [N], and determine if the source content directly supports those claims.
+
+Rules:
+- "verified" only if the source content directly contains the specific factual content being claimed.
+- "unsupported" if the source is unrelated, contradicts the claim, is too vague, or merely topically adjacent.
+- Loose reasoning like "this paper is about X so X must be true" is NOT enough. Be strict.
+- If multiple claims cite this source and any one is unsupported, return "unsupported".
+- "reason": one short sentence (<= 25 words) explaining the verdict. Reference the specific claim and source content.`;
+
+export function buildVerificationPrompt(answer: string, source: Source): {
+  system: string;
+  user: string;
+} {
+  return {
+    system: VERIFIER_INSTRUCTION,
+    user: `ANSWER:\n${answer}\n\n---\n\nCITED SOURCE [${source.id}]:\nTitle: ${source.title}\nContent: ${source.snippet}`,
   };
 }
