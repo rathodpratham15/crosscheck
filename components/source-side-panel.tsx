@@ -1,0 +1,95 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import type { Source } from "@/lib/tavily";
+
+type SourceSidePanelProps = {
+  source: Source | null;
+  onClose: () => void;
+};
+
+export function SourceSidePanel({ source, onClose }: SourceSidePanelProps) {
+  // Keep a copy of the last shown source so content stays visible during slide-out.
+  const [displayed, setDisplayed] = useState<Source | null>(source);
+  if (source && source !== displayed) {
+    // React 19: deriving from prop during render is the idiomatic pattern here.
+    setDisplayed(source);
+  }
+
+  useEffect(() => {
+    if (source) return;
+    // Clear content after the slide-out transition completes (matches duration-300 below).
+    const t = setTimeout(() => setDisplayed(null), 300);
+    return () => clearTimeout(t);
+  }, [source]);
+
+  useEffect(() => {
+    if (!source) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [source, onClose]);
+
+  const isOpen = source !== null;
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        aria-hidden="true"
+        className={
+          "fixed inset-0 z-40 bg-black/40 transition-opacity duration-300 " +
+          (isOpen ? "opacity-100" : "pointer-events-none opacity-0")
+        }
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={!isOpen}
+        className={
+          "fixed top-0 right-0 z-50 h-full w-full max-w-md transform border-l border-zinc-200 bg-white p-6 shadow-2xl transition-transform duration-300 ease-out dark:border-zinc-800 dark:bg-zinc-950 " +
+          (isOpen ? "translate-x-0" : "translate-x-full")
+        }
+      >
+        {displayed && (
+          <div className="flex h-full flex-col">
+            <header className="mb-4 flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold dark:bg-zinc-800">
+                  {displayed.id}
+                </span>
+                <h2 className="text-sm font-semibold leading-5">
+                  {displayed.title}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close source panel"
+                className="-mt-1 -mr-2 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+              >
+                ✕
+              </button>
+            </header>
+            <p className="mb-4 break-all text-xs text-zinc-500">
+              {displayed.url}
+            </p>
+            <p className="mb-6 text-sm leading-6 text-zinc-700 dark:text-zinc-300">
+              {displayed.snippet}
+            </p>
+            <a
+              href={displayed.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex w-fit items-center gap-1 rounded-md border border-zinc-200 px-3 py-1.5 text-sm transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            >
+              Open original ↗
+            </a>
+          </div>
+        )}
+      </aside>
+    </>
+  );
+}

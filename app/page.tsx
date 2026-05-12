@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Answer } from "@/components/answer";
+import { SourceSidePanel } from "@/components/source-side-panel";
+import { SourceStrip } from "@/components/source-strip";
 import type { Source } from "@/lib/tavily";
 
 type ServerEvent =
@@ -13,6 +15,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +24,7 @@ export default function Home() {
 
     setAnswer("");
     setSources([]);
+    setSelectedSourceId(null);
     setError(null);
     setIsStreaming(true);
 
@@ -74,12 +78,9 @@ export default function Home() {
     }
   }
 
-  function handleCitationClick(id: number) {
-    // Stub — wired to the SourceSidePanel in slice 2c
-    console.log("citation clicked:", id);
-  }
-
   const hasResult = answer.length > 0 || sources.length > 0;
+  const selectedSource =
+    sources.find((s) => s.id === selectedSourceId) ?? null;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16">
@@ -124,9 +125,19 @@ export default function Home() {
 
       {hasResult && (
         <section className="rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <Answer text={answer} onCitationClick={handleCitationClick} />
+          <SourceStrip
+            sources={sources}
+            selectedId={selectedSourceId}
+            onSelect={setSelectedSourceId}
+          />
+          <Answer text={answer} onCitationClick={setSelectedSourceId} />
         </section>
       )}
+
+      <SourceSidePanel
+        source={selectedSource}
+        onClose={() => setSelectedSourceId(null)}
+      />
     </main>
   );
 }
