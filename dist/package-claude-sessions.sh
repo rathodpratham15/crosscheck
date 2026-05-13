@@ -19,7 +19,7 @@ OUTPUT_DIR="${1:-$REPO_ROOT/dist}"
 OUTPUT_FILE="$OUTPUT_DIR/claude-sessions-$TIMESTAMP.tar.gz"
 
 # Sanitize repo path: replace /, _, and spaces with -
-sanitize_path() { printf '%s' "$1" | sed 's|/|-|g; s|_|-|g; s| |-|g'; }
+sanitize_path() { printf '%s' "$1" | sed 's|/|-|g; s|_|-|g; s| |-|g; s|\.|-|g'; }
 SANITIZED="$(sanitize_path "$SEARCH_ROOT")"
 PROJECTS_ROOT="$HOME/.claude/projects"
 
