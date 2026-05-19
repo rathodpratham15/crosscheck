@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import { Answer } from "@/components/answer";
+import { AuthButton } from "@/components/auth-button";
 import type { CitationStatus } from "@/components/citation-chip";
 import { ExamplePrompts } from "@/components/example-prompts";
 import {
@@ -15,7 +17,7 @@ import {
   type VerificationDisplay,
 } from "@/components/source-side-panel";
 import { SourceStrip } from "@/components/source-strip";
-import { isSaved, saveConversation, deleteSaved } from "@/lib/saved";
+import { saveConversation, deleteSaved } from "@/lib/saved";
 import type { Source } from "@/lib/tavily";
 
 const MIN_QUERY_LENGTH = 5;
@@ -136,6 +138,7 @@ async function streamResearch(
 }
 
 export default function Home() {
+  const { data: session } = useSession();
   const [query, setQuery] = useState("");
   const [followUpQuery, setFollowUpQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -368,19 +371,37 @@ export default function Home() {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!answer || !submittedQuery) return;
     if (savedId) {
-      deleteSaved(savedId);
+      if (session?.user) {
+        await fetch(`/api/saved/${savedId}`, { method: "DELETE" });
+      } else {
+        deleteSaved(savedId);
+      }
       setSavedId(null);
     } else {
-      const entry = saveConversation({
-        query: submittedQuery,
-        answer,
-        sources,
-        verifications,
-      });
-      setSavedId(entry.id);
+      if (session?.user) {
+        try {
+          const res = await fetch("/api/saved", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: submittedQuery, answer, sources, verifications }),
+          });
+          if (res.ok) {
+            const entry = (await res.json()) as { id: string };
+            setSavedId(entry.id);
+          }
+        } catch {}
+      } else {
+        const entry = saveConversation({
+          query: submittedQuery,
+          answer,
+          sources,
+          verifications,
+        });
+        setSavedId(entry.id);
+      }
     }
   }
 
@@ -501,12 +522,15 @@ export default function Home() {
             Citations you can verify, not just trust.
           </p>
         </div>
-        <Link
-          href="/saved"
-          className="mt-1 text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
-        >
-          Saved ↗
-        </Link>
+        <div className="mt-1 flex items-center gap-4">
+          <Link
+            href="/saved"
+            className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+          >
+            Saved ↗
+          </Link>
+          <AuthButton />
+        </div>
       </header>
 
       <form
@@ -734,7 +758,7 @@ export default function Home() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={handleSave}
+                    onClick={() => void handleSave()}
                     className={
                       "text-xs transition-colors " +
                       (savedId
