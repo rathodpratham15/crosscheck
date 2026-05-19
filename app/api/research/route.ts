@@ -1,5 +1,6 @@
 import { Output, generateText, streamText } from "ai";
 import {
+  GEMINI_RESEARCH_MODEL,
   GPT_RESEARCH_MODEL,
   RESEARCH_MODEL,
   VERIFIER_MODEL,
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
   const { query, history, provider } = (await req.json()) as {
     query?: string;
     history?: { query: string; answer: string }[];
-    provider?: "claude" | "gpt";
+    provider?: "claude" | "gpt" | "gemini";
   };
 
   if (!query || typeof query !== "string" || query.trim().length === 0) {
@@ -61,15 +62,25 @@ export async function POST(req: Request) {
 
   const { system, user } = buildResearchPrompt(query, sources, history);
 
-  const researchModel =
-    provider === "gpt" ? GPT_RESEARCH_MODEL : RESEARCH_MODEL;
-
   if (provider === "gpt" && !process.env.OPENAI_API_KEY) {
     return Response.json(
       { error: "OPENAI_API_KEY is not configured on this server." },
       { status: 503 },
     );
   }
+  if (provider === "gemini" && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return Response.json(
+      { error: "GOOGLE_GENERATIVE_AI_API_KEY is not configured on this server." },
+      { status: 503 },
+    );
+  }
+
+  const researchModel =
+    provider === "gpt"
+      ? GPT_RESEARCH_MODEL
+      : provider === "gemini"
+        ? GEMINI_RESEARCH_MODEL
+        : RESEARCH_MODEL;
 
   const result = streamText({
     model: researchModel,
