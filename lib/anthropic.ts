@@ -10,6 +10,7 @@ export const GPT_RESEARCH_MODEL = openai("gpt-4o-mini");
 export const VerificationSchema = z.object({
   status: z.enum(["verified", "unsupported"]),
   reason: z.string(),
+  quote: z.string(),
 });
 export type Verification = z.infer<typeof VerificationSchema>;
 
@@ -55,7 +56,8 @@ Rules:
 - "unsupported" if the source is unrelated, contradicts the claim, is too vague, or merely topically adjacent.
 - Loose reasoning like "this paper is about X so X must be true" is NOT enough. Be strict.
 - If multiple claims cite this source and any one is unsupported, return "unsupported".
-- "reason": one short sentence (<= 25 words) explaining the verdict. Reference the specific claim and source content.`;
+- "reason": one short sentence (<= 25 words) explaining the verdict. Reference the specific claim and source content.
+- "quote": a verbatim excerpt (<= 30 words) from the source content that most directly supports the cited claim. Return an empty string if the status is "unsupported" or no specific excerpt applies.`;
 
 export function buildVerificationPrompt(answer: string, source: Source): {
   system: string;
