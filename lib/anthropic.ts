@@ -1,4 +1,5 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import type { Source } from "./tavily";
@@ -6,6 +7,7 @@ import type { Source } from "./tavily";
 export const RESEARCH_MODEL = anthropic("claude-sonnet-4-6");
 export const VERIFIER_MODEL = anthropic("claude-haiku-4-5-20251001");
 export const GPT_RESEARCH_MODEL = openai("gpt-4o-mini");
+export const GEMINI_RESEARCH_MODEL = google("gemini-2.0-flash");
 
 export const SuggestionsSchema = z.object({
   questions: z.array(z.string()).min(1).max(6),

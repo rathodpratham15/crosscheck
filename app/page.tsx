@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Answer } from "@/components/answer";
 import type { CitationStatus } from "@/components/citation-chip";
@@ -14,6 +15,7 @@ import {
   type VerificationDisplay,
 } from "@/components/source-side-panel";
 import { SourceStrip } from "@/components/source-strip";
+import { isSaved, saveConversation, deleteSaved } from "@/lib/saved";
 import type { Source } from "@/lib/tavily";
 
 const MIN_QUERY_LENGTH = 5;
@@ -203,6 +205,18 @@ export default function Home() {
   const [gptIsStreaming, setGptIsStreaming] = useState(false);
   const [gptError, setGptError] = useState<string | null>(null);
 
+  // Gemini comparison
+  const [geminiAnswer, setGeminiAnswer] = useState("");
+  const [geminiSources, setGeminiSources] = useState<Source[]>([]);
+  const [geminiVerifications, setGeminiVerifications] = useState<
+    Record<number, VerificationDisplay>
+  >({});
+  const [geminiIsStreaming, setGeminiIsStreaming] = useState(false);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
+
+  // Save state
+  const [savedId, setSavedId] = useState<string | null>(null);
+
   async function fetchSuggestions(q: string, ans: string) {
     try {
       const res = await fetch("/api/suggestions", {
@@ -236,8 +250,13 @@ export default function Home() {
     setGptSources([]);
     setGptVerifications({});
     setGptError(null);
+    setGeminiAnswer("");
+    setGeminiSources([]);
+    setGeminiVerifications({});
+    setGeminiError(null);
     setSuggestions([]);
     setActiveFilters(new Set());
+    setSavedId(null);
 
     // Update URL for shareability
     window.history.replaceState(
@@ -314,6 +333,57 @@ export default function Home() {
     }
   }
 
+  async function runGeminiCompare() {
+    if (geminiIsStreaming || !submittedQuery) return;
+    setGeminiAnswer("");
+    setGeminiSources([]);
+    setGeminiVerifications({});
+    setGeminiError(null);
+    setGeminiIsStreaming(true);
+
+    try {
+      await streamResearch(
+        { query: submittedQuery, provider: "gemini" },
+        {
+          onSources: setGeminiSources,
+          onDelta: (text) => setGeminiAnswer((prev) => prev + text),
+          onVerificationStart: (ids) =>
+            setGeminiVerifications((prev) => {
+              const next = { ...prev };
+              for (const id of ids) next[id] = { status: "checking" };
+              return next;
+            }),
+          onVerification: (id, status, reason, quote) =>
+            setGeminiVerifications((prev) => ({
+              ...prev,
+              [id]: { status, reason, quote },
+            })),
+          onError: setGeminiError,
+        },
+      );
+    } catch (err) {
+      setGeminiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGeminiIsStreaming(false);
+    }
+  }
+
+  function handleSave() {
+    if (!answer || !submittedQuery) return;
+    if (savedId) {
+      deleteSaved(savedId);
+      setSavedId(null);
+    } else {
+      const entry = saveConversation({
+        query: submittedQuery,
+        answer,
+        sources,
+        verifications,
+      });
+      setSavedId(entry.id);
+    }
+  }
+
   function handleCopyBibtex() {
     const bib = generateBibtex(sources, answer);
     if (!bib) return;
@@ -375,6 +445,7 @@ export default function Home() {
   const hasCitations =
     answer.length > 0 && /\[\d+\]/.test(answer) && sources.length > 0;
   const hasGptResult = gptAnswer.length > 0 || gptSources.length > 0;
+  const hasGeminiResult = geminiAnswer.length > 0 || geminiSources.length > 0;
   const selectedSource = sources.find((s) => s.id === selectedSourceId) ?? null;
 
   // Source domain filtering
@@ -421,13 +492,21 @@ export default function Home() {
         (isEmpty ? "justify-center" : "")
       }
     >
-      <header>
-        <h1 className="text-4xl font-semibold tracking-tight">
-          crosscheck<span className="text-indigo-500">.</span>
-        </h1>
-        <p className="mt-2 text-sm text-zinc-500">
-          Citations you can verify, not just trust.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-4xl font-semibold tracking-tight">
+            crosscheck<span className="text-indigo-500">.</span>
+          </h1>
+          <p className="mt-2 text-sm text-zinc-500">
+            Citations you can verify, not just trust.
+          </p>
+        </div>
+        <Link
+          href="/saved"
+          className="mt-1 text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+        >
+          Saved ↗
+        </Link>
       </header>
 
       <form
@@ -625,22 +704,46 @@ export default function Home() {
               getCitationStatus={getStatus}
             />
             {hasResult && !isStreaming && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                <div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                <div className="flex flex-wrap items-center gap-3">
                   {hasCitations && (
-                    <button
-                      type="button"
-                      onClick={() => void runGptCompare()}
-                      disabled={gptIsStreaming}
-                      className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
-                    >
-                      {hasGptResult || gptIsStreaming
-                        ? "↺ Re-compare GPT-4o mini"
-                        : "Compare with GPT-4o mini →"}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void runGptCompare()}
+                        disabled={gptIsStreaming}
+                        className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
+                      >
+                        {hasGptResult || gptIsStreaming
+                          ? "↺ GPT-4o mini"
+                          : "GPT-4o mini →"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void runGeminiCompare()}
+                        disabled={geminiIsStreaming}
+                        className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
+                      >
+                        {hasGeminiResult || geminiIsStreaming
+                          ? "↺ Gemini"
+                          : "Gemini →"}
+                      </button>
+                    </>
                   )}
                 </div>
                 <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    className={
+                      "text-xs transition-colors " +
+                      (savedId
+                        ? "text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300"
+                        : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200")
+                    }
+                  >
+                    {savedId ? "Saved ★" : "Save ☆"}
+                  </button>
                   <button
                     type="button"
                     onClick={handleCopyLink}
@@ -706,6 +809,47 @@ export default function Home() {
           />
           {gptError && (
             <p className="mt-2 text-xs text-red-500">{gptError}</p>
+          )}
+        </section>
+      )}
+
+      {/* Gemini comparison result */}
+      {(hasGeminiResult || geminiIsStreaming) && (
+        <section className="animate-fade-in min-w-0 rounded-lg border border-teal-200 bg-white px-4 py-4 dark:border-teal-900 dark:bg-zinc-950">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-teal-500">
+              Gemini 2.0 Flash
+            </span>
+            {geminiIsStreaming && (
+              <ResearchProgress
+                step={
+                  geminiSources.length === 0
+                    ? "searching"
+                    : Object.values(geminiVerifications).some(
+                          (v) => v.status === "checking",
+                        )
+                      ? "verifying"
+                      : "generating"
+                }
+              />
+            )}
+          </div>
+          {geminiIsStreaming && geminiSources.length === 0 && (
+            <SearchingIndicator />
+          )}
+          <SourceStrip
+            sources={geminiSources}
+            selectedId={null}
+            onSelect={() => {}}
+            getStatus={(id) => geminiVerifications[id]?.status}
+          />
+          <Answer
+            text={geminiAnswer}
+            onCitationClick={() => {}}
+            getCitationStatus={(id) => geminiVerifications[id]?.status}
+          />
+          {geminiError && (
+            <p className="mt-2 text-xs text-red-500">{geminiError}</p>
           )}
         </section>
       )}
