@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { Answer } from "@/components/answer";
 import type { CitationStatus } from "@/components/citation-chip";
 import { ExamplePrompts } from "@/components/example-prompts";
+import {
+  ResearchProgress,
+  type ResearchStep,
+} from "@/components/research-progress";
 import { SearchingIndicator } from "@/components/searching-indicator";
 import {
   SourceSidePanel,
@@ -18,17 +22,25 @@ const HISTORY_KEY = "crosscheck-history";
 
 function generateBibtex(sources: Source[], answer: string): string {
   const cited = new Set<number>();
-  for (const m of answer.matchAll(/\[(\d+)\]/g)) {
-    cited.add(Number(m[1]));
-  }
+  for (const m of answer.matchAll(/\[(\d+)\]/g)) cited.add(Number(m[1]));
   return sources
     .filter((s) => cited.has(s.id))
     .map((s) => {
-      const key = `crosscheck${s.id}`;
       const title = s.title.replace(/[{}]/g, "");
-      return `@misc{${key},\n  title = {${title}},\n  url   = {${s.url}},\n  note  = {Accessed via crosscheck}\n}`;
+      return `@misc{crosscheck${s.id},\n  title = {${title}},\n  url   = {${s.url}},\n  note  = {Accessed via crosscheck}\n}`;
     })
     .join("\n\n");
+}
+
+function generateMarkdown(
+  query: string,
+  answer: string,
+  sources: Source[],
+): string {
+  const srcBlock = sources
+    .map((s) => `${s.id}. [${s.title}](${s.url})`)
+    .join("\n");
+  return `# ${query}\n\n${answer}\n\n---\n\n## Sources\n\n${srcBlock}`;
 }
 
 type ServerEvent =
@@ -40,6 +52,7 @@ type ServerEvent =
       citationId: number;
       status: "verified" | "unsupported";
       reason: string;
+      quote: string;
     }
   | { type: "error"; message: string };
 
@@ -60,6 +73,7 @@ async function streamResearch(
       id: number,
       status: "verified" | "unsupported",
       reason: string,
+      quote: string,
     ) => void;
     onError: (msg: string) => void;
   },
@@ -89,14 +103,12 @@ async function streamResearch(
       const line = buffer.slice(0, newlineIdx);
       buffer = buffer.slice(newlineIdx + 1);
       if (!line.trim()) continue;
-
       let event: ServerEvent;
       try {
         event = JSON.parse(line) as ServerEvent;
       } catch {
         continue;
       }
-
       if (event.type === "sources") callbacks.onSources(event.sources);
       else if (event.type === "delta") callbacks.onDelta(event.text);
       else if (event.type === "verification-start")
@@ -106,6 +118,7 @@ async function streamResearch(
           event.citationId,
           event.status,
           event.reason,
+          event.quote,
         );
       else if (event.type === "error") callbacks.onError(event.message);
     }
@@ -126,10 +139,13 @@ export default function Home() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedMd, setCopiedMd] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Search history
   const [history, setHistory] = useState<string[]>([]);
   const historyRef = useRef<string[]>([]);
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem(HISTORY_KEY);
@@ -139,6 +155,13 @@ export default function Home() {
         setHistory(parsed);
       }
     } catch {}
+    // Auto-run search if ?q= is in the URL
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q && q.trim().length >= MIN_QUERY_LENGTH) {
+      setQuery(q);
+      void runSearch(q, []);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function saveToHistory(q: string) {
@@ -172,7 +195,7 @@ export default function Home() {
 
   async function runSearch(
     q: string,
-    history: { query: string; answer: string }[],
+    historyArg: { query: string; answer: string }[],
   ) {
     const trimmed = q.trim();
     if (trimmed.length < MIN_QUERY_LENGTH || isStreaming) return;
@@ -185,15 +208,21 @@ export default function Home() {
     setError(null);
     setIsStreaming(true);
     setFollowUpQuery("");
-    // Clear GPT compare on new search
     setGptAnswer("");
     setGptSources([]);
     setGptVerifications({});
     setGptError(null);
 
+    // Update URL for shareability
+    window.history.replaceState(
+      {},
+      "",
+      `?q=${encodeURIComponent(trimmed)}`,
+    );
+
     try {
       await streamResearch(
-        { query: trimmed, history },
+        { query: trimmed, history: historyArg },
         {
           onSources: setSources,
           onDelta: (text) => setAnswer((prev) => prev + text),
@@ -203,10 +232,10 @@ export default function Home() {
               for (const id of ids) next[id] = { status: "checking" };
               return next;
             }),
-          onVerification: (id, status, reason) =>
+          onVerification: (id, status, reason, quote) =>
             setVerifications((prev) => ({
               ...prev,
-              [id]: { status, reason },
+              [id]: { status, reason, quote },
             })),
           onError: setError,
         },
@@ -239,10 +268,10 @@ export default function Home() {
               for (const id of ids) next[id] = { status: "checking" };
               return next;
             }),
-          onVerification: (id, status, reason) =>
+          onVerification: (id, status, reason, quote) =>
             setGptVerifications((prev) => ({
               ...prev,
-              [id]: { status, reason },
+              [id]: { status, reason, quote },
             })),
           onError: setGptError,
         },
@@ -260,6 +289,21 @@ export default function Home() {
     void navigator.clipboard.writeText(bib).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  function handleCopyMarkdown() {
+    const md = generateMarkdown(submittedQuery, answer, sources);
+    void navigator.clipboard.writeText(md).then(() => {
+      setCopiedMd(true);
+      setTimeout(() => setCopiedMd(false), 2000);
+    });
+  }
+
+  function handleCopyLink() {
+    void navigator.clipboard.writeText(window.location.href).then(() => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
     });
   }
 
@@ -300,6 +344,15 @@ export default function Home() {
   const isEmpty = !hasResult && !isStreaming && turns.length === 0;
   const trimmedLen = query.trim().length;
   const tooShort = trimmedLen > 0 && trimmedLen < MIN_QUERY_LENGTH;
+
+  // Derive streaming step for progress indicator
+  const streamingStep: ResearchStep | null = !isStreaming
+    ? null
+    : sources.length === 0
+      ? "searching"
+      : Object.values(verifications).some((v) => v.status === "checking")
+        ? "verifying"
+        : "generating";
 
   return (
     <main
@@ -362,7 +415,7 @@ export default function Home() {
           {history.length > 0 && (
             <div className="animate-fade-in">
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
                   Recent
                 </p>
                 <button
@@ -390,6 +443,7 @@ export default function Home() {
         </>
       )}
 
+      {/* Top-level searching indicator (before any result, first search) */}
       {isStreaming && sources.length === 0 && turns.length === 0 && (
         <div className="animate-fade-in">
           <SearchingIndicator />
@@ -451,6 +505,9 @@ export default function Home() {
               <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
                 Claude
               </span>
+              {streamingStep && streamingStep !== "searching" && (
+                <ResearchProgress step={streamingStep} />
+              )}
             </div>
             <SourceStrip
               sources={sources}
@@ -463,25 +520,47 @@ export default function Home() {
               onCitationClick={setSelectedSourceId}
               getCitationStatus={getStatus}
             />
-            {hasCitations && !isStreaming && (
-              <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => void runGptCompare()}
-                  disabled={gptIsStreaming}
-                  className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
-                >
-                  {hasGptResult || gptIsStreaming
-                    ? "↺ Re-compare with GPT-4o mini"
-                    : "Compare with GPT-4o mini →"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCopyBibtex}
-                  className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
-                >
-                  {copied ? "Copied!" : "Copy BibTeX"}
-                </button>
+            {hasResult && !isStreaming && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                <div>
+                  {hasCitations && (
+                    <button
+                      type="button"
+                      onClick={() => void runGptCompare()}
+                      disabled={gptIsStreaming}
+                      className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
+                    >
+                      {hasGptResult || gptIsStreaming
+                        ? "↺ Re-compare GPT-4o mini"
+                        : "Compare with GPT-4o mini →"}
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+                  >
+                    {copiedLink ? "Copied!" : "Share ↗"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyMarkdown}
+                    className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+                  >
+                    {copiedMd ? "Copied!" : "Markdown"}
+                  </button>
+                  {hasCitations && (
+                    <button
+                      type="button"
+                      onClick={handleCopyBibtex}
+                      className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+                    >
+                      {copied ? "Copied!" : "BibTeX"}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </section>
@@ -496,7 +575,17 @@ export default function Home() {
               GPT-4o mini
             </span>
             {gptIsStreaming && (
-              <span className="text-xs text-zinc-400">Streaming…</span>
+              <ResearchProgress
+                step={
+                  gptSources.length === 0
+                    ? "searching"
+                    : Object.values(gptVerifications).some(
+                          (v) => v.status === "checking",
+                        )
+                      ? "verifying"
+                      : "generating"
+                }
+              />
             )}
           </div>
           {gptIsStreaming && gptSources.length === 0 && <SearchingIndicator />}

@@ -20,6 +20,7 @@ type Event =
       citationId: number;
       status: "verified" | "unsupported";
       reason: string;
+      quote: string;
     }
   | { type: "error"; message: string };
 
@@ -123,6 +124,7 @@ export async function POST(req: Request) {
             citationId: id,
             status: output.status,
             reason: output.reason,
+            quote: output.quote,
           });
         } catch {
           enqueue({
@@ -130,6 +132,7 @@ export async function POST(req: Request) {
             citationId: id,
             status: "unsupported",
             reason: "Verification call failed; defaulting to unsupported.",
+            quote: "",
           });
         }
       });
