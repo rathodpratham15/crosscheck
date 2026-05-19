@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Answer } from "@/components/answer";
 import type { CitationStatus } from "@/components/citation-chip";
 import { ExamplePrompts } from "@/components/example-prompts";
@@ -13,6 +13,8 @@ import { SourceStrip } from "@/components/source-strip";
 import type { Source } from "@/lib/tavily";
 
 const MIN_QUERY_LENGTH = 5;
+const MAX_HISTORY = 8;
+const HISTORY_KEY = "crosscheck-history";
 
 function generateBibtex(sources: Source[], answer: string): string {
   const cited = new Set<number>();
@@ -48,6 +50,68 @@ type Turn = {
   verifications: Record<number, VerificationDisplay>;
 };
 
+async function streamResearch(
+  body: Record<string, unknown>,
+  callbacks: {
+    onSources: (sources: Source[]) => void;
+    onDelta: (text: string) => void;
+    onVerificationStart: (ids: number[]) => void;
+    onVerification: (
+      id: number,
+      status: "verified" | "unsupported",
+      reason: string,
+    ) => void;
+    onError: (msg: string) => void;
+  },
+): Promise<void> {
+  const res = await fetch("/api/research", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Request failed: ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let newlineIdx: number;
+    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIdx);
+      buffer = buffer.slice(newlineIdx + 1);
+      if (!line.trim()) continue;
+
+      let event: ServerEvent;
+      try {
+        event = JSON.parse(line) as ServerEvent;
+      } catch {
+        continue;
+      }
+
+      if (event.type === "sources") callbacks.onSources(event.sources);
+      else if (event.type === "delta") callbacks.onDelta(event.text);
+      else if (event.type === "verification-start")
+        callbacks.onVerificationStart(event.citationIds);
+      else if (event.type === "verification")
+        callbacks.onVerification(
+          event.citationId,
+          event.status,
+          event.reason,
+        );
+      else if (event.type === "error") callbacks.onError(event.message);
+    }
+  }
+}
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [followUpQuery, setFollowUpQuery] = useState("");
@@ -62,6 +126,49 @@ export default function Home() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Search history
+  const [history, setHistory] = useState<string[]>([]);
+  const historyRef = useRef<string[]>([]);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(HISTORY_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as string[];
+        historyRef.current = parsed;
+        setHistory(parsed);
+      }
+    } catch {}
+  }, []);
+
+  function saveToHistory(q: string) {
+    const next = [q, ...historyRef.current.filter((h) => h !== q)].slice(
+      0,
+      MAX_HISTORY,
+    );
+    historyRef.current = next;
+    setHistory(next);
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+    } catch {}
+  }
+
+  function clearHistory() {
+    historyRef.current = [];
+    setHistory([]);
+    try {
+      localStorage.removeItem(HISTORY_KEY);
+    } catch {}
+  }
+
+  // GPT comparison
+  const [gptAnswer, setGptAnswer] = useState("");
+  const [gptSources, setGptSources] = useState<Source[]>([]);
+  const [gptVerifications, setGptVerifications] = useState<
+    Record<number, VerificationDisplay>
+  >({});
+  const [gptIsStreaming, setGptIsStreaming] = useState(false);
+  const [gptError, setGptError] = useState<string | null>(null);
 
   async function runSearch(
     q: string,
@@ -78,70 +185,72 @@ export default function Home() {
     setError(null);
     setIsStreaming(true);
     setFollowUpQuery("");
+    // Clear GPT compare on new search
+    setGptAnswer("");
+    setGptSources([]);
+    setGptVerifications({});
+    setGptError(null);
 
     try {
-      const res = await fetch("/api/research", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: trimmed, history }),
-      });
-
-      if (!res.ok || !res.body) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Request failed: ${res.status}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        let newlineIdx: number;
-        while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, newlineIdx);
-          buffer = buffer.slice(newlineIdx + 1);
-          if (!line.trim()) continue;
-
-          let event: ServerEvent;
-          try {
-            event = JSON.parse(line) as ServerEvent;
-          } catch {
-            continue;
-          }
-
-          if (event.type === "sources") {
-            setSources(event.sources);
-          } else if (event.type === "delta") {
-            setAnswer((prev) => prev + event.text);
-          } else if (event.type === "verification-start") {
+      await streamResearch(
+        { query: trimmed, history },
+        {
+          onSources: setSources,
+          onDelta: (text) => setAnswer((prev) => prev + text),
+          onVerificationStart: (ids) =>
             setVerifications((prev) => {
               const next = { ...prev };
-              for (const id of event.citationIds) {
-                next[id] = { status: "checking" };
-              }
+              for (const id of ids) next[id] = { status: "checking" };
               return next;
-            });
-          } else if (event.type === "verification") {
+            }),
+          onVerification: (id, status, reason) =>
             setVerifications((prev) => ({
               ...prev,
-              [event.citationId]: {
-                status: event.status,
-                reason: event.reason,
-              },
-            }));
-          } else if (event.type === "error") {
-            setError(event.message);
-          }
-        }
-      }
+              [id]: { status, reason },
+            })),
+          onError: setError,
+        },
+      );
+      saveToHistory(trimmed);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsStreaming(false);
+    }
+  }
+
+  async function runGptCompare() {
+    if (gptIsStreaming || !submittedQuery) return;
+    setGptAnswer("");
+    setGptSources([]);
+    setGptVerifications({});
+    setGptError(null);
+    setGptIsStreaming(true);
+
+    try {
+      await streamResearch(
+        { query: submittedQuery, provider: "gpt" },
+        {
+          onSources: setGptSources,
+          onDelta: (text) => setGptAnswer((prev) => prev + text),
+          onVerificationStart: (ids) =>
+            setGptVerifications((prev) => {
+              const next = { ...prev };
+              for (const id of ids) next[id] = { status: "checking" };
+              return next;
+            }),
+          onVerification: (id, status, reason) =>
+            setGptVerifications((prev) => ({
+              ...prev,
+              [id]: { status, reason },
+            })),
+          onError: setGptError,
+        },
+      );
+    } catch (err) {
+      setGptError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGptIsStreaming(false);
     }
   }
 
@@ -163,7 +272,7 @@ export default function Home() {
   function handleFollowUp() {
     if (followUpQuery.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
 
-    const history = [
+    const priorHistory = [
       ...turns.map((t) => ({ query: t.query, answer: t.answer })),
       ...(answer ? [{ query: submittedQuery, answer }] : []),
     ];
@@ -175,18 +284,19 @@ export default function Home() {
       ]);
     }
 
-    void runSearch(followUpQuery, history);
+    void runSearch(followUpQuery, priorHistory);
   }
 
   const hasResult = answer.length > 0 || sources.length > 0;
   const hasCitations =
     answer.length > 0 && /\[\d+\]/.test(answer) && sources.length > 0;
-  const selectedSource =
-    sources.find((s) => s.id === selectedSourceId) ?? null;
+  const hasGptResult = gptAnswer.length > 0 || gptSources.length > 0;
+  const selectedSource = sources.find((s) => s.id === selectedSourceId) ?? null;
   const getStatus = (id: number): CitationStatus | undefined =>
     verifications[id]?.status;
-  const selectedVerification =
-    selectedSource ? verifications[selectedSource.id] : undefined;
+  const selectedVerification = selectedSource
+    ? verifications[selectedSource.id]
+    : undefined;
   const isEmpty = !hasResult && !isStreaming && turns.length === 0;
   const trimmedLen = query.trim().length;
   const tooShort = trimmedLen > 0 && trimmedLen < MIN_QUERY_LENGTH;
@@ -246,8 +356,38 @@ export default function Home() {
         </div>
       </form>
 
-      {!hasResult && !isStreaming && !error && turns.length === 0 && (
-        <ExamplePrompts onSelect={setQuery} />
+      {isEmpty && !error && (
+        <>
+          <ExamplePrompts onSelect={setQuery} />
+          {history.length > 0 && (
+            <div className="animate-fade-in">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+                  Recent
+                </p>
+                <button
+                  type="button"
+                  onClick={clearHistory}
+                  className="text-xs text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {history.map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => setQuery(h)}
+                    className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-900 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {isStreaming && sources.length === 0 && turns.length === 0 && (
@@ -288,7 +428,7 @@ export default function Home() {
           key={i}
           className="min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-900"
         >
-          <p className="mb-3 text-xs font-medium text-zinc-400 uppercase tracking-wide">
+          <p className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
             {turn.query}
           </p>
           <Answer
@@ -307,6 +447,11 @@ export default function Home() {
             </div>
           )}
           <section className="animate-fade-in min-w-0 rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                Claude
+              </span>
+            </div>
             <SourceStrip
               sources={sources}
               selectedId={selectedSourceId}
@@ -319,7 +464,17 @@ export default function Home() {
               getCitationStatus={getStatus}
             />
             {hasCitations && !isStreaming && (
-              <div className="mt-4 flex justify-end border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => void runGptCompare()}
+                  disabled={gptIsStreaming}
+                  className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
+                >
+                  {hasGptResult || gptIsStreaming
+                    ? "↺ Re-compare with GPT-4o mini"
+                    : "Compare with GPT-4o mini →"}
+                </button>
                 <button
                   type="button"
                   onClick={handleCopyBibtex}
@@ -331,6 +486,35 @@ export default function Home() {
             )}
           </section>
         </>
+      )}
+
+      {/* GPT-4o comparison result */}
+      {(hasGptResult || gptIsStreaming) && (
+        <section className="animate-fade-in min-w-0 rounded-lg border border-violet-200 bg-white px-4 py-4 dark:border-violet-900 dark:bg-zinc-950">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-violet-500">
+              GPT-4o mini
+            </span>
+            {gptIsStreaming && (
+              <span className="text-xs text-zinc-400">Streaming…</span>
+            )}
+          </div>
+          {gptIsStreaming && gptSources.length === 0 && <SearchingIndicator />}
+          <SourceStrip
+            sources={gptSources}
+            selectedId={null}
+            onSelect={() => {}}
+            getStatus={(id) => gptVerifications[id]?.status}
+          />
+          <Answer
+            text={gptAnswer}
+            onCitationClick={() => {}}
+            getCitationStatus={(id) => gptVerifications[id]?.status}
+          />
+          {gptError && (
+            <p className="mt-2 text-xs text-red-500">{gptError}</p>
+          )}
+        </section>
       )}
 
       {hasResult && !isStreaming && (

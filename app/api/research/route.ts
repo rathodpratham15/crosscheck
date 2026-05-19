@@ -1,5 +1,6 @@
 import { Output, generateText, streamText } from "ai";
 import {
+  GPT_RESEARCH_MODEL,
   RESEARCH_MODEL,
   VERIFIER_MODEL,
   VerificationSchema,
@@ -37,9 +38,10 @@ function extractCitedIds(answer: string, sources: Source[]): number[] {
 }
 
 export async function POST(req: Request) {
-  const { query, history } = (await req.json()) as {
+  const { query, history, provider } = (await req.json()) as {
     query?: string;
     history?: { query: string; answer: string }[];
+    provider?: "claude" | "gpt";
   };
 
   if (!query || typeof query !== "string" || query.trim().length === 0) {
@@ -58,8 +60,18 @@ export async function POST(req: Request) {
 
   const { system, user } = buildResearchPrompt(query, sources, history);
 
+  const researchModel =
+    provider === "gpt" ? GPT_RESEARCH_MODEL : RESEARCH_MODEL;
+
+  if (provider === "gpt" && !process.env.OPENAI_API_KEY) {
+    return Response.json(
+      { error: "OPENAI_API_KEY is not configured on this server." },
+      { status: 503 },
+    );
+  }
+
   const result = streamText({
-    model: RESEARCH_MODEL,
+    model: researchModel,
     system,
     prompt: user,
   });
