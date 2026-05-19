@@ -88,9 +88,12 @@ export function SourceSidePanel({
                 ✕
               </button>
             </header>
-            <p className="mb-4 break-all text-xs text-zinc-500">
-              {displayed.url}
-            </p>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <p className="break-all text-xs text-zinc-500">{displayed.url}</p>
+              <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-xs tabular-nums text-zinc-500 dark:bg-zinc-800">
+                {Math.round(displayed.score * 100)}% match
+              </span>
+            </div>
             {verification && <VerificationBanner verification={verification} />}
             <p className="mb-6 text-sm leading-6 text-zinc-700 dark:text-zinc-300">
               {displayed.snippet}

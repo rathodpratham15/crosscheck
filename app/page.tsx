@@ -14,6 +14,21 @@ import type { Source } from "@/lib/tavily";
 
 const MIN_QUERY_LENGTH = 5;
 
+function generateBibtex(sources: Source[], answer: string): string {
+  const cited = new Set<number>();
+  for (const m of answer.matchAll(/\[(\d+)\]/g)) {
+    cited.add(Number(m[1]));
+  }
+  return sources
+    .filter((s) => cited.has(s.id))
+    .map((s) => {
+      const key = `crosscheck${s.id}`;
+      const title = s.title.replace(/[{}]/g, "");
+      return `@misc{${key},\n  title = {${title}},\n  url   = {${s.url}},\n  note  = {Accessed via crosscheck}\n}`;
+    })
+    .join("\n\n");
+}
+
 type ServerEvent =
   | { type: "sources"; sources: Source[] }
   | { type: "delta"; text: string }
@@ -46,6 +61,7 @@ export default function Home() {
   >({});
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function runSearch(
     q: string,
@@ -129,6 +145,15 @@ export default function Home() {
     }
   }
 
+  function handleCopyBibtex() {
+    const bib = generateBibtex(sources, answer);
+    if (!bib) return;
+    void navigator.clipboard.writeText(bib).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   function handleNewSearch() {
     if (query.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
     setTurns([]);
@@ -154,6 +179,8 @@ export default function Home() {
   }
 
   const hasResult = answer.length > 0 || sources.length > 0;
+  const hasCitations =
+    answer.length > 0 && /\[\d+\]/.test(answer) && sources.length > 0;
   const selectedSource =
     sources.find((s) => s.id === selectedSourceId) ?? null;
   const getStatus = (id: number): CitationStatus | undefined =>
@@ -291,6 +318,17 @@ export default function Home() {
               onCitationClick={setSelectedSourceId}
               getCitationStatus={getStatus}
             />
+            {hasCitations && !isStreaming && (
+              <div className="mt-4 flex justify-end border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={handleCopyBibtex}
+                  className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+                >
+                  {copied ? "Copied!" : "Copy BibTeX"}
+                </button>
+              </div>
+            )}
           </section>
         </>
       )}
