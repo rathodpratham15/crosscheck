@@ -20,6 +20,14 @@ const MIN_QUERY_LENGTH = 5;
 const MAX_HISTORY = 8;
 const HISTORY_KEY = "crosscheck-history";
 
+function getDomain(url: string): string {
+  if (url.includes("arxiv.org")) return "arXiv";
+  if (url.includes("semanticscholar.org")) return "S2";
+  if (url.includes("paperswithcode.com")) return "PwC";
+  if (url.includes("github.com")) return "GitHub";
+  return "Other";
+}
+
 function generateBibtex(sources: Source[], answer: string): string {
   const cited = new Set<number>();
   for (const m of answer.matchAll(/\[(\d+)\]/g)) cited.add(Number(m[1]));
@@ -141,6 +149,8 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const [copiedMd, setCopiedMd] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
 
   // Search history
   const [history, setHistory] = useState<string[]>([]);
@@ -193,6 +203,20 @@ export default function Home() {
   const [gptIsStreaming, setGptIsStreaming] = useState(false);
   const [gptError, setGptError] = useState<string | null>(null);
 
+  async function fetchSuggestions(q: string, ans: string) {
+    try {
+      const res = await fetch("/api/suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, answer: ans }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { suggestions: string[] };
+        setSuggestions(data.suggestions ?? []);
+      }
+    } catch {}
+  }
+
   async function runSearch(
     q: string,
     historyArg: { query: string; answer: string }[],
@@ -212,6 +236,8 @@ export default function Home() {
     setGptSources([]);
     setGptVerifications({});
     setGptError(null);
+    setSuggestions([]);
+    setActiveFilters(new Set());
 
     // Update URL for shareability
     window.history.replaceState(
@@ -220,12 +246,16 @@ export default function Home() {
       `?q=${encodeURIComponent(trimmed)}`,
     );
 
+    let accumulatedAnswer = "";
     try {
       await streamResearch(
         { query: trimmed, history: historyArg },
         {
           onSources: setSources,
-          onDelta: (text) => setAnswer((prev) => prev + text),
+          onDelta: (text) => {
+            accumulatedAnswer += text;
+            setAnswer((prev) => prev + text);
+          },
           onVerificationStart: (ids) =>
             setVerifications((prev) => {
               const next = { ...prev };
@@ -241,6 +271,7 @@ export default function Home() {
         },
       );
       saveToHistory(trimmed);
+      if (accumulatedAnswer) void fetchSuggestions(trimmed, accumulatedAnswer);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -331,11 +362,40 @@ export default function Home() {
     void runSearch(followUpQuery, priorHistory);
   }
 
+  function toggleFilter(domain: string) {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(domain)) next.delete(domain);
+      else next.add(domain);
+      return next;
+    });
+  }
+
   const hasResult = answer.length > 0 || sources.length > 0;
   const hasCitations =
     answer.length > 0 && /\[\d+\]/.test(answer) && sources.length > 0;
   const hasGptResult = gptAnswer.length > 0 || gptSources.length > 0;
   const selectedSource = sources.find((s) => s.id === selectedSourceId) ?? null;
+
+  // Source domain filtering
+  const sourceDomains = [...new Set(sources.map((s) => getDomain(s.url)))];
+  const filteredSources =
+    activeFilters.size === 0
+      ? sources
+      : sources.filter((s) => activeFilters.has(getDomain(s.url)));
+
+  // Confidence score
+  const verificationValues = Object.values(verifications);
+  const totalChecked = verificationValues.filter(
+    (v) => v.status !== "checking",
+  ).length;
+  const totalVerified = verificationValues.filter(
+    (v) => v.status === "verified",
+  ).length;
+  const confidenceScore =
+    !isStreaming && totalChecked > 0
+      ? Math.round((totalVerified / totalChecked) * 100)
+      : null;
   const getStatus = (id: number): CitationStatus | undefined =>
     verifications[id]?.status;
   const selectedVerification = selectedSource
@@ -502,15 +562,59 @@ export default function Home() {
           )}
           <section className="animate-fade-in min-w-0 rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950">
             <div className="mb-3 flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
-                Claude
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                  Claude
+                </span>
+                {confidenceScore !== null && (
+                  <span
+                    className={
+                      "rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums " +
+                      (confidenceScore >= 80
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                        : confidenceScore >= 50
+                          ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                          : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300")
+                    }
+                  >
+                    {confidenceScore}% verified
+                  </span>
+                )}
+              </div>
               {streamingStep && streamingStep !== "searching" && (
                 <ResearchProgress step={streamingStep} />
               )}
             </div>
+            {sourceDomains.length > 1 && (
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                {sourceDomains.map((domain) => (
+                  <button
+                    key={domain}
+                    type="button"
+                    onClick={() => toggleFilter(domain)}
+                    className={
+                      "rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors " +
+                      (activeFilters.has(domain)
+                        ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900"
+                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700")
+                    }
+                  >
+                    {domain}
+                  </button>
+                ))}
+                {activeFilters.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveFilters(new Set())}
+                    className="text-[11px] text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
             <SourceStrip
-              sources={sources}
+              sources={filteredSources}
               selectedId={selectedSourceId}
               onSelect={setSelectedSourceId}
               getStatus={getStatus}
@@ -604,6 +708,38 @@ export default function Home() {
             <p className="mt-2 text-xs text-red-500">{gptError}</p>
           )}
         </section>
+      )}
+
+      {suggestions.length > 0 && !isStreaming && (
+        <div className="animate-fade-in">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
+            Explore further
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  const history = [
+                    ...turns.map((t) => ({ query: t.query, answer: t.answer })),
+                    ...(answer ? [{ query: submittedQuery, answer }] : []),
+                  ];
+                  if (answer) {
+                    setTurns((prev) => [
+                      ...prev,
+                      { query: submittedQuery, answer, sources, verifications },
+                    ]);
+                  }
+                  void runSearch(s, history);
+                }}
+                className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs text-zinc-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-indigo-800 dark:hover:bg-indigo-950 dark:hover:text-indigo-300"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {hasResult && !isStreaming && (

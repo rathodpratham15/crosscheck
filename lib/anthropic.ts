@@ -7,6 +7,10 @@ export const RESEARCH_MODEL = anthropic("claude-sonnet-4-6");
 export const VERIFIER_MODEL = anthropic("claude-haiku-4-5-20251001");
 export const GPT_RESEARCH_MODEL = openai("gpt-4o-mini");
 
+export const SuggestionsSchema = z.object({
+  questions: z.array(z.string()).min(1).max(6),
+});
+
 export const VerificationSchema = z.object({
   status: z.enum(["verified", "unsupported"]),
   reason: z.string(),
