@@ -52,7 +52,17 @@ export function SourceStrip({
             >
               {s.id}
             </span>
-            <span className="max-w-48 truncate">{s.title}</span>
+            <span className="max-w-32 truncate">{s.title}</span>
+            <span
+              className={
+                "shrink-0 tabular-nums text-[10px] " +
+                (isSelected
+                  ? "text-white/70 dark:text-zinc-900/70"
+                  : "text-zinc-400 dark:text-zinc-500")
+              }
+            >
+              {Math.round(s.score * 100)}%
+            </span>
             {status && (
               <span
                 aria-label={`verification ${status}`}
