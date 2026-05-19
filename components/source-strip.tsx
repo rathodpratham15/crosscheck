@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import type { Source } from "@/lib/tavily";
 import type { CitationStatus } from "./citation-chip";
 
@@ -22,11 +23,34 @@ export function SourceStrip({
   onSelect,
   getStatus,
 }: SourceStripProps) {
+  const stripRef = useRef<HTMLDivElement>(null);
+
   if (sources.length === 0) return null;
 
+  function handleKeyDown(
+    e: React.KeyboardEvent<HTMLButtonElement>,
+    idx: number,
+  ) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const buttons =
+      stripRef.current?.querySelectorAll<HTMLButtonElement>("button");
+    if (!buttons) return;
+    const next =
+      e.key === "ArrowRight"
+        ? Math.min(idx + 1, buttons.length - 1)
+        : Math.max(idx - 1, 0);
+    buttons[next]?.focus();
+  }
+
   return (
-    <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-zinc-200 px-4 pb-3 scrollbar-none [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
-      {sources.map((s) => {
+    <div
+      ref={stripRef}
+      role="toolbar"
+      aria-label="Sources"
+      className="-mx-4 mb-4 flex gap-2 overflow-x-auto border-b border-zinc-200 px-4 pb-3 scrollbar-none [&::-webkit-scrollbar]:hidden dark:border-zinc-800"
+    >
+      {sources.map((s, idx) => {
         const isSelected = s.id === selectedId;
         const status = getStatus?.(s.id);
         return (
@@ -34,6 +58,7 @@ export function SourceStrip({
             key={s.id}
             type="button"
             onClick={() => onSelect(s.id)}
+            onKeyDown={(e) => handleKeyDown(e, idx)}
             className={
               "flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors " +
               (isSelected
