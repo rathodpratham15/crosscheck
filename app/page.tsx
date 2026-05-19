@@ -26,8 +26,18 @@ type ServerEvent =
     }
   | { type: "error"; message: string };
 
+type Turn = {
+  query: string;
+  answer: string;
+  sources: Source[];
+  verifications: Record<number, VerificationDisplay>;
+};
+
 export default function Home() {
   const [query, setQuery] = useState("");
+  const [followUpQuery, setFollowUpQuery] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
+  const [turns, setTurns] = useState<Turn[]>([]);
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
@@ -37,21 +47,27 @@ export default function Home() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit() {
-    if (query.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
+  async function runSearch(
+    q: string,
+    history: { query: string; answer: string }[],
+  ) {
+    const trimmed = q.trim();
+    if (trimmed.length < MIN_QUERY_LENGTH || isStreaming) return;
 
+    setSubmittedQuery(trimmed);
     setAnswer("");
     setSources([]);
     setSelectedSourceId(null);
     setVerifications({});
     setError(null);
     setIsStreaming(true);
+    setFollowUpQuery("");
 
     try {
       const res = await fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query: trimmed, history }),
       });
 
       if (!res.ok || !res.body) {
@@ -113,6 +129,30 @@ export default function Home() {
     }
   }
 
+  function handleNewSearch() {
+    if (query.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
+    setTurns([]);
+    void runSearch(query, []);
+  }
+
+  function handleFollowUp() {
+    if (followUpQuery.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
+
+    const history = [
+      ...turns.map((t) => ({ query: t.query, answer: t.answer })),
+      ...(answer ? [{ query: submittedQuery, answer }] : []),
+    ];
+
+    if (answer) {
+      setTurns((prev) => [
+        ...prev,
+        { query: submittedQuery, answer, sources, verifications },
+      ]);
+    }
+
+    void runSearch(followUpQuery, history);
+  }
+
   const hasResult = answer.length > 0 || sources.length > 0;
   const selectedSource =
     sources.find((s) => s.id === selectedSourceId) ?? null;
@@ -120,9 +160,7 @@ export default function Home() {
     verifications[id]?.status;
   const selectedVerification =
     selectedSource ? verifications[selectedSource.id] : undefined;
-  // Keep "centered" layout for empty + error states (no result yet); switch to
-  // top-aligned only once we have something to show.
-  const isEmpty = !hasResult && !isStreaming;
+  const isEmpty = !hasResult && !isStreaming && turns.length === 0;
   const trimmedLen = query.trim().length;
   const tooShort = trimmedLen > 0 && trimmedLen < MIN_QUERY_LENGTH;
 
@@ -145,7 +183,7 @@ export default function Home() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void handleSubmit();
+          handleNewSearch();
         }}
         className="flex flex-col gap-3"
       >
@@ -155,7 +193,7 @@ export default function Home() {
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
-              void handleSubmit();
+              handleNewSearch();
             }
           }}
           placeholder="Ask anything about AI/ML research…"
@@ -181,11 +219,11 @@ export default function Home() {
         </div>
       </form>
 
-      {!hasResult && !isStreaming && !error && (
+      {!hasResult && !isStreaming && !error && turns.length === 0 && (
         <ExamplePrompts onSelect={setQuery} />
       )}
 
-      {isStreaming && sources.length === 0 && (
+      {isStreaming && sources.length === 0 && turns.length === 0 && (
         <div className="animate-fade-in">
           <SearchingIndicator />
         </div>
@@ -218,20 +256,74 @@ export default function Home() {
         </div>
       )}
 
-      {hasResult && (
-        <section className="animate-fade-in min-w-0 rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <SourceStrip
-            sources={sources}
-            selectedId={selectedSourceId}
-            onSelect={setSelectedSourceId}
-            getStatus={getStatus}
-          />
+      {turns.map((turn, i) => (
+        <section
+          key={i}
+          className="min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-900"
+        >
+          <p className="mb-3 text-xs font-medium text-zinc-400 uppercase tracking-wide">
+            {turn.query}
+          </p>
           <Answer
-            text={answer}
-            onCitationClick={setSelectedSourceId}
-            getCitationStatus={getStatus}
+            text={turn.answer}
+            onCitationClick={() => {}}
+            getCitationStatus={(id) => turn.verifications[id]?.status}
           />
         </section>
+      ))}
+
+      {(hasResult || (isStreaming && turns.length > 0)) && (
+        <>
+          {isStreaming && sources.length === 0 && (
+            <div className="animate-fade-in">
+              <SearchingIndicator />
+            </div>
+          )}
+          <section className="animate-fade-in min-w-0 rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950">
+            <SourceStrip
+              sources={sources}
+              selectedId={selectedSourceId}
+              onSelect={setSelectedSourceId}
+              getStatus={getStatus}
+            />
+            <Answer
+              text={answer}
+              onCitationClick={setSelectedSourceId}
+              getCitationStatus={getStatus}
+            />
+          </section>
+        </>
+      )}
+
+      {hasResult && !isStreaming && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleFollowUp();
+          }}
+          className="flex gap-2"
+        >
+          <textarea
+            value={followUpQuery}
+            onChange={(e) => setFollowUpQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                handleFollowUp();
+              }
+            }}
+            placeholder="Ask a follow-up…"
+            rows={2}
+            className="flex-1 resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm outline-none transition-colors focus:border-indigo-500 dark:border-zinc-800 dark:bg-zinc-950 dark:focus:border-indigo-400"
+          />
+          <button
+            type="submit"
+            disabled={followUpQuery.trim().length < MIN_QUERY_LENGTH}
+            className="self-end rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            Follow up ↩
+          </button>
+        </form>
       )}
 
       <SourceSidePanel

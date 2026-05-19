@@ -21,16 +21,28 @@ Rules:
 - If the sources do not contain enough information to answer, say so plainly and cite the sources that came closest.
 - Answer concisely: 2–4 short paragraphs. Use markdown (bold, italic, lists) sparingly for clarity, not decoration.`;
 
-export function buildResearchPrompt(query: string, sources: Source[]) {
+export function buildResearchPrompt(
+  query: string,
+  sources: Source[],
+  history?: { query: string; answer: string }[],
+) {
   const sourcesBlock = sources
     .map(
       (s) => `[${s.id}] ${s.title}\nURL: ${s.url}\nSnippet: ${s.snippet}`,
     )
     .join("\n\n");
 
+  let historyBlock = "";
+  if (history && history.length > 0) {
+    const turns = history
+      .map((t, i) => `Q${i + 1}: ${t.query}\nA${i + 1}: ${t.answer}`)
+      .join("\n\n");
+    historyBlock = `Prior conversation (context only — citation numbers below refer to the new sources):\n\n${turns}\n\n---\n\n`;
+  }
+
   return {
     system: SYSTEM_INSTRUCTION,
-    user: `Question: ${query}\n\n---\n\nSources:\n${sourcesBlock}`,
+    user: `${historyBlock}Question: ${query}\n\n---\n\nSources:\n${sourcesBlock}`,
   };
 }
 

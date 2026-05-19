@@ -37,7 +37,10 @@ function extractCitedIds(answer: string, sources: Source[]): number[] {
 }
 
 export async function POST(req: Request) {
-  const { query } = (await req.json()) as { query?: string };
+  const { query, history } = (await req.json()) as {
+    query?: string;
+    history?: { query: string; answer: string }[];
+  };
 
   if (!query || typeof query !== "string" || query.trim().length === 0) {
     return Response.json({ error: "query is required" }, { status: 400 });
@@ -53,7 +56,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { system, user } = buildResearchPrompt(query, sources);
+  const { system, user } = buildResearchPrompt(query, sources, history);
 
   const result = streamText({
     model: RESEARCH_MODEL,
