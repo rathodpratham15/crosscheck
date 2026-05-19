@@ -1,9 +1,11 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import type { Source } from "./tavily";
 
 export const RESEARCH_MODEL = anthropic("claude-sonnet-4-6");
 export const VERIFIER_MODEL = anthropic("claude-haiku-4-5-20251001");
+export const GPT_RESEARCH_MODEL = openai("gpt-4o-mini");
 
 export const VerificationSchema = z.object({
   status: z.enum(["verified", "unsupported"]),
