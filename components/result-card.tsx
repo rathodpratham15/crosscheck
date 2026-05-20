@@ -26,7 +26,7 @@ const MODEL_ACCENT: Record<"claude" | "gpt" | "gemini", string> = {
 const MODEL_LABEL: Record<"claude" | "gpt" | "gemini", string> = {
   claude: "Claude Sonnet",
   gpt: "GPT-4o mini",
-  gemini: "Gemini 2.0 Flash",
+  gemini: "Llama 3.3 · Groq",
 };
 
 function getDomainKey(url: string): DomainFilter {
@@ -240,7 +240,7 @@ export function ResultCard({
                   )}
                   {!geminiDone && onRunGemini && (
                     <ModelTrigger
-                      label="Compare Gemini 2.0 →"
+                      label="Compare Llama 3.3 →"
                       color="var(--color-gemini)"
                       onClick={onRunGemini}
                     />

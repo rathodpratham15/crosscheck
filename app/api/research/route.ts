@@ -68,9 +68,9 @@ export async function POST(req: Request) {
       { status: 503 },
     );
   }
-  if (provider === "gemini" && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+  if (provider === "gemini" && !process.env.GROQ_API_KEY) {
     return Response.json(
-      { error: "GOOGLE_GENERATIVE_AI_API_KEY is not configured on this server." },
+      { error: "GROQ_API_KEY is not configured on this server." },
       { status: 503 },
     );
   }

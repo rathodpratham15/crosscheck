@@ -56,7 +56,7 @@ export function SearchComposer({
       <div className="flex items-center justify-between border-t border-[var(--color-border)] px-3 py-2">
         <div className="flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
           <Sparkles className="h-3 w-3 text-indigo-400" strokeWidth={1.75} />
-          <span className="font-mono">Claude · GPT-4o mini · Gemini 2.0</span>
+          <span className="font-mono">Claude · GPT-4o mini · Llama 3.3</span>
         </div>
         <div className="flex items-center gap-2">
           <kbd className="hidden items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-ink-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)] sm:inline-flex">
