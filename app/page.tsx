@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { SearchComposer } from "@/components/search-composer";
 import { EmptyState } from "@/components/empty-state";
@@ -154,6 +155,7 @@ export default function Home() {
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
+  const [selectedSourceModel, setSelectedSourceModel] = useState<"claude" | "gpt" | "gemini">("claude");
   const [verifications, setVerifications] = useState<
     Record<number, VerificationDisplay>
   >({});
@@ -170,6 +172,7 @@ export default function Home() {
   type ConversationSummary = { title: string; turns: Turn[] };
   const [pastConversations, setPastConversations] = useState<ConversationSummary[]>([]);
   const [viewingConvIndex, setViewingConvIndex] = useState<number | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // GPT comparison
   const [gptAnswer, setGptAnswer] = useState("");
@@ -256,6 +259,7 @@ export default function Home() {
     setAnswer("");
     setSources([]);
     setSelectedSourceId(null);
+    setSelectedSourceModel("claude");
     setVerifications({});
     setError(null);
     setIsStreaming(true);
@@ -536,11 +540,20 @@ export default function Home() {
   const isEmpty =
     !hasResult && !isStreaming && turns.length === 0 && !error;
 
+  const sourcesByModel = { claude: sources, gpt: gptSources, gemini: geminiSources };
+  const verifsByModel = { claude: verifications, gpt: gptVerifications, gemini: geminiVerifications };
   const selectedSource =
-    sources.find((s) => s.id === selectedSourceId) ?? null;
+    selectedSourceId !== null
+      ? (sourcesByModel[selectedSourceModel].find((s) => s.id === selectedSourceId) ?? null)
+      : null;
   const selectedVerification = selectedSource
-    ? verifications[selectedSource.id]
+    ? verifsByModel[selectedSourceModel][selectedSource.id]
     : undefined;
+
+  function selectSource(id: number, model: "claude" | "gpt" | "gemini" = "claude") {
+    setSelectedSourceId(id);
+    setSelectedSourceModel(model);
+  }
 
   const streamingStep: StreamStep = isStreaming
     ? sources.length === 0
@@ -565,6 +578,12 @@ export default function Home() {
         ? "verifying"
         : "generating"
     : "searching";
+
+  const inComparisonMode = hasGptResult || gptIsStreaming || hasGeminiResult || geminiIsStreaming;
+  const activeModelCount =
+    1 +
+    (hasGptResult || gptIsStreaming ? 1 : 0) +
+    (hasGeminiResult || geminiIsStreaming ? 1 : 0);
 
   return (
     <>
@@ -602,69 +621,97 @@ export default function Home() {
         <main className="flex h-[calc(100svh-56px)] overflow-hidden bg-grid">
 
           {/* LEFT PANE — desktop only */}
-          <aside className="hidden md:flex w-[360px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)]">
-            {/* Search bar */}
-            <div className="border-b border-[var(--color-border)] p-4">
-              <SearchComposer
-                compact
-                value={query}
-                onChange={setQuery}
-                onSubmit={handleNewSearch}
-                busy={isStreaming}
-              />
-            </div>
-
-            {/* Conversation list */}
-            <div className="flex-1 overflow-y-auto scroll-thin py-2">
-              {pastConversations.length > 0 && (
-                <p className="mb-1 px-4 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
-                  History
-                </p>
-              )}
-
-              {/* Past conversations */}
-              {pastConversations.map((conv, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setViewingConvIndex(viewingConvIndex === i ? null : i)}
-                  className={`mx-2 mb-1 w-[calc(100%-1rem)] rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--color-ink-2)] ${
-                    viewingConvIndex === i ? "bg-[var(--color-ink-2)]" : "opacity-70"
-                  }`}
-                >
-                  <p className="truncate text-[13px] font-medium text-[var(--color-fg)]">
-                    {conv.title}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                    {conv.turns.length} {conv.turns.length === 1 ? "turn" : "turns"}
-                  </p>
-                </button>
-              ))}
-
-              {/* Current conversation */}
-              {submittedQuery && (
+          <aside
+            className={`hidden md:flex shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)] transition-[width] duration-200 ease-in-out overflow-hidden ${
+              sidebarCollapsed ? "w-12" : "w-[360px]"
+            }`}
+          >
+            {sidebarCollapsed ? (
+              /* Collapsed strip */
+              <div className="flex flex-1 flex-col items-center pt-3">
                 <button
                   type="button"
-                  onClick={() => setViewingConvIndex(null)}
-                  className={`mx-2 w-[calc(100%-1rem)] rounded-lg px-3 py-2 text-left ring-1 ring-indigo-500/20 transition-colors ${
-                    viewingConvIndex === null ? "bg-indigo-500/10" : "bg-indigo-500/5 opacity-70 hover:bg-indigo-500/10"
-                  }`}
+                  onClick={() => setSidebarCollapsed(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-ink-2)] hover:text-[var(--color-fg)]"
+                  aria-label="Expand sidebar"
                 >
-                  <p className="truncate text-[13px] font-medium text-[var(--color-fg)]">
-                    {turns.length > 0 ? turns[0].query : submittedQuery}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-indigo-400">
-                    {isStreaming ? "Researching…" : `${turns.length + 1} ${turns.length === 0 ? "turn" : "turns"}`}
-                  </p>
+                  <ChevronRight className="h-4 w-4" strokeWidth={1.75} />
                 </button>
-              )}
-            </div>
-
-            {/* Follow-up composer */}
-            {hasResult && !isStreaming && viewingConvIndex === null && (
-              <div className="border-t border-[var(--color-border)] p-4">
-                <FollowUpComposer onSubmit={handleFollowUp} />
               </div>
+            ) : (
+              <>
+                {/* Search bar + collapse button */}
+                <div className="flex items-center gap-2 border-b border-[var(--color-border)] p-4">
+                  <div className="min-w-0 flex-1">
+                    <SearchComposer
+                      compact
+                      value={query}
+                      onChange={setQuery}
+                      onSubmit={handleNewSearch}
+                      busy={isStreaming}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSidebarCollapsed(true)}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-ink-2)] hover:text-[var(--color-fg)]"
+                    aria-label="Collapse sidebar"
+                  >
+                    <ChevronLeft className="h-4 w-4" strokeWidth={1.75} />
+                  </button>
+                </div>
+
+                {/* Conversation list */}
+                <div className="flex-1 overflow-y-auto scroll-thin py-2">
+                  {pastConversations.length > 0 && (
+                    <p className="mb-1 px-4 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+                      History
+                    </p>
+                  )}
+
+                  {pastConversations.map((conv, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setViewingConvIndex(viewingConvIndex === i ? null : i)}
+                      className={`mx-2 mb-1 w-[calc(100%-1rem)] rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--color-ink-2)] ${
+                        viewingConvIndex === i ? "bg-[var(--color-ink-2)]" : "opacity-70"
+                      }`}
+                    >
+                      <p className="truncate text-[13px] font-medium text-[var(--color-fg)]">
+                        {conv.title}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                        {conv.turns.length} {conv.turns.length === 1 ? "turn" : "turns"}
+                      </p>
+                    </button>
+                  ))}
+
+                  {submittedQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setViewingConvIndex(null)}
+                      className={`mx-2 w-[calc(100%-1rem)] rounded-lg px-3 py-2 text-left ring-1 ring-indigo-500/20 transition-colors ${
+                        viewingConvIndex === null ? "bg-indigo-500/10" : "bg-indigo-500/5 opacity-70 hover:bg-indigo-500/10"
+                      }`}
+                    >
+                      <p className="truncate text-[13px] font-medium text-[var(--color-fg)]">
+                        {turns.length > 0 ? turns[0].query : submittedQuery}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-indigo-400">
+                        {isStreaming ? "Researching…" : `${turns.length + 1} ${turns.length === 0 ? "turn" : "turns"}`}
+                      </p>
+                    </button>
+                  )}
+                </div>
+
+                {/* Follow-up composer */}
+                {hasResult && !isStreaming && viewingConvIndex === null && (
+                  <div className="border-t border-[var(--color-border)] p-4">
+                    <FollowUpComposer onSubmit={handleFollowUp} />
+                  </div>
+                )}
+              </>
             )}
           </aside>
 
@@ -682,7 +729,7 @@ export default function Home() {
             </div>
 
             <div className="flex-1 overflow-y-auto scroll-thin">
-              <div className="mx-auto max-w-[780px] px-4 py-4 md:px-6 md:py-6">
+              <div className={`mx-auto px-4 py-4 md:px-6 md:py-6 ${inComparisonMode ? "max-w-full" : "max-w-[780px]"}`}>
 
                 {/* Error */}
                 {error && (
@@ -718,7 +765,7 @@ export default function Home() {
                           turn={turn}
                           collapsed={!isLast}
                           dimmed={!isLast}
-                          onSelectSource={setSelectedSourceId}
+                          onSelectSource={(id) => selectSource(id, "claude")}
                           onSave={saveTurnData}
                           onShare={shareTurnData}
                         />
@@ -740,108 +787,174 @@ export default function Home() {
                   />
                 ))}
 
-                {/* Current conversation — prior turns stacked + active result */}
+                {/* Current conversation — active result */}
                 {viewingConvIndex === null && (
                   <>
-                    {/* Claude — streaming state */}
-                    {isStreaming && sources.length === 0 && (
-                      <div className="mb-4 fade-up">
-                        <StreamingState query={submittedQuery} step={streamingStep} />
-                      </div>
-                    )}
+                    {inComparisonMode ? (
+                      /* ── Side-by-side comparison grid ── */
+                      <>
+                        {/* Shared question header */}
+                        <div className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elev)] px-5 py-4">
+                          <p className="font-heading text-[15px] font-semibold leading-snug text-[var(--color-fg)]">
+                            {submittedQuery}
+                          </p>
+                        </div>
 
-                    {/* Claude result */}
-                    {(hasResult || (isStreaming && sources.length > 0)) && (
-                      <div className="mb-6">
-                        <ResultCard
-                          model="claude"
-                          answer={answer}
-                          sources={sources}
-                          verifications={verifications}
-                          showQuery
-                          isPrimary
-                          isStreaming={isStreaming}
-                          isSaved={!!savedId}
-                          onSave={() => void handleSave()}
-                          onShare={() => void handleShare()}
-                          onSelectSource={setSelectedSourceId}
-                          onRunGpt={
-                            hasCitations && !gptIsStreaming
-                              ? () => void runGptCompare()
-                              : undefined
-                          }
-                          onRunGemini={
-                            hasCitations && !geminiIsStreaming
-                              ? () => void runGeminiCompare()
-                              : undefined
-                          }
-                          gptDone={hasGptResult || gptIsStreaming}
-                          geminiDone={hasGeminiResult || geminiIsStreaming}
-                          cachedResult={cachedResult}
-                          onRerun={() => {
-                            setCachedResult(false);
-                            void runSearch(submittedQuery, []);
-                          }}
-                          query={submittedQuery}
-                        />
-                      </div>
-                    )}
+                        <div
+                          className={`grid gap-4 items-start ${
+                            activeModelCount === 3
+                              ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+                              : "grid-cols-1 md:grid-cols-2"
+                          }`}
+                        >
+                          {/* Claude */}
+                          <div className="flex flex-col">
+                            {isStreaming && sources.length === 0 && (
+                              <div className="mb-4 fade-up">
+                                <StreamingState query={submittedQuery} step={streamingStep} />
+                              </div>
+                            )}
+                            {(hasResult || (isStreaming && sources.length > 0)) && (
+                              <ResultCard
+                                model="claude"
+                                answer={answer}
+                                sources={sources}
+                                verifications={verifications}
+                                isPrimary
+                                isStreaming={isStreaming}
+                                isSaved={!!savedId}
+                                onSave={() => void handleSave()}
+                                onShare={() => void handleShare()}
+                                onSelectSource={(id) => selectSource(id, "claude")}
+                                onRunGpt={
+                                  hasCitations && !gptIsStreaming
+                                    ? () => void runGptCompare()
+                                    : undefined
+                                }
+                                onRunGemini={
+                                  hasCitations && !geminiIsStreaming
+                                    ? () => void runGeminiCompare()
+                                    : undefined
+                                }
+                                gptDone={hasGptResult || gptIsStreaming}
+                                geminiDone={hasGeminiResult || geminiIsStreaming}
+                                cachedResult={cachedResult}
+                                onRerun={() => {
+                                  setCachedResult(false);
+                                  void runSearch(submittedQuery, []);
+                                }}
+                                query={submittedQuery}
+                              />
+                            )}
+                          </div>
 
-                    {/* GPT — streaming state */}
-                    {gptIsStreaming && gptSources.length === 0 && (
-                      <div className="mb-4 fade-up">
-                        <StreamingState query={submittedQuery} step={gptStep} />
-                      </div>
-                    )}
+                          {/* GPT */}
+                          {(hasGptResult || gptIsStreaming) && (
+                            <div className="flex flex-col">
+                              {gptIsStreaming && gptSources.length === 0 && (
+                                <div className="mb-4 fade-up">
+                                  <StreamingState query={submittedQuery} step={gptStep} />
+                                </div>
+                              )}
+                              {gptError && <p className="mb-2 text-xs text-red-400">{gptError}</p>}
+                              {(gptAnswer || gptSources.length > 0) && (
+                                <ResultCard
+                                  model="gpt"
+                                  answer={gptAnswer}
+                                  sources={gptSources}
+                                  verifications={gptVerifications}
+                                  isStreaming={gptIsStreaming}
+                                  onSelectSource={(id) => selectSource(id, "gpt")}
+                                  query={submittedQuery}
+                                />
+                              )}
+                            </div>
+                          )}
 
-                    {/* GPT result */}
-                    {(hasGptResult || gptIsStreaming) && (
-                      <div className="mb-6">
-                        {gptError && <p className="mb-2 text-xs text-red-400">{gptError}</p>}
-                        {(gptAnswer || gptSources.length > 0) && (
-                          <ResultCard
-                            model="gpt"
-                            answer={gptAnswer}
-                            sources={gptSources}
-                            verifications={gptVerifications}
-                            isStreaming={gptIsStreaming}
-                            onSelectSource={() => {}}
-                            query={submittedQuery}
-                          />
+                          {/* Llama */}
+                          {(hasGeminiResult || geminiIsStreaming) && (
+                            <div className="flex flex-col">
+                              {geminiIsStreaming && geminiSources.length === 0 && (
+                                <div className="mb-4 fade-up">
+                                  <StreamingState query={submittedQuery} step={geminiStep} />
+                                </div>
+                              )}
+                              {geminiError && <p className="mb-2 text-xs text-red-400">{geminiError}</p>}
+                              {(geminiAnswer || geminiSources.length > 0) && (
+                                <ResultCard
+                                  model="gemini"
+                                  answer={geminiAnswer}
+                                  sources={geminiSources}
+                                  verifications={geminiVerifications}
+                                  isStreaming={geminiIsStreaming}
+                                  onSelectSource={(id) => selectSource(id, "gemini")}
+                                  query={submittedQuery}
+                                />
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {suggestions.length > 0 && !isStreaming && (
+                          <div className="mt-6 mb-6 fade-up">
+                            <ExploreFurther items={suggestions} onPick={handleExplorePick} />
+                          </div>
                         )}
-                      </div>
-                    )}
-
-                    {/* Llama — streaming state */}
-                    {geminiIsStreaming && geminiSources.length === 0 && (
-                      <div className="mb-4 fade-up">
-                        <StreamingState query={submittedQuery} step={geminiStep} />
-                      </div>
-                    )}
-
-                    {/* Llama result */}
-                    {(hasGeminiResult || geminiIsStreaming) && (
-                      <div className="mb-6">
-                        {geminiError && <p className="mb-2 text-xs text-red-400">{geminiError}</p>}
-                        {(geminiAnswer || geminiSources.length > 0) && (
-                          <ResultCard
-                            model="gemini"
-                            answer={geminiAnswer}
-                            sources={geminiSources}
-                            verifications={geminiVerifications}
-                            isStreaming={geminiIsStreaming}
-                            onSelectSource={() => {}}
-                            query={submittedQuery}
-                          />
+                      </>
+                    ) : (
+                      /* ── Normal single-model layout ── */
+                      <>
+                        {/* Claude — streaming state */}
+                        {isStreaming && sources.length === 0 && (
+                          <div className="mb-4 fade-up">
+                            <StreamingState query={submittedQuery} step={streamingStep} />
+                          </div>
                         )}
-                      </div>
-                    )}
 
-                    {/* Explore further */}
-                    {suggestions.length > 0 && !isStreaming && (
-                      <div className="mb-6 fade-up">
-                        <ExploreFurther items={suggestions} onPick={handleExplorePick} />
-                      </div>
+                        {/* Claude result */}
+                        {(hasResult || (isStreaming && sources.length > 0)) && (
+                          <div className="mb-6">
+                            <ResultCard
+                              model="claude"
+                              answer={answer}
+                              sources={sources}
+                              verifications={verifications}
+                              showQuery
+                              isPrimary
+                              isStreaming={isStreaming}
+                              isSaved={!!savedId}
+                              onSave={() => void handleSave()}
+                              onShare={() => void handleShare()}
+                              onSelectSource={(id) => selectSource(id, "claude")}
+                              onRunGpt={
+                                hasCitations && !gptIsStreaming
+                                  ? () => void runGptCompare()
+                                  : undefined
+                              }
+                              onRunGemini={
+                                hasCitations && !geminiIsStreaming
+                                  ? () => void runGeminiCompare()
+                                  : undefined
+                              }
+                              gptDone={hasGptResult || gptIsStreaming}
+                              geminiDone={hasGeminiResult || geminiIsStreaming}
+                              cachedResult={cachedResult}
+                              onRerun={() => {
+                                setCachedResult(false);
+                                void runSearch(submittedQuery, []);
+                              }}
+                              query={submittedQuery}
+                            />
+                          </div>
+                        )}
+
+                        {/* Explore further */}
+                        {suggestions.length > 0 && !isStreaming && (
+                          <div className="mb-6 fade-up">
+                            <ExploreFurther items={suggestions} onPick={handleExplorePick} />
+                          </div>
+                        )}
+                      </>
                     )}
                   </>
                 )}
@@ -863,7 +976,7 @@ export default function Home() {
       <SourceDetail
         source={selectedSource}
         verification={selectedVerification}
-        onClose={() => setSelectedSourceId(null)}
+        onClose={() => { setSelectedSourceId(null); setSelectedSourceModel("claude"); }}
       />
     </>
   );

@@ -83,7 +83,7 @@ export function SourcePill({
         {source.id}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="line-clamp-2 text-[12.5px] font-medium leading-snug text-[var(--color-fg)] group-hover:text-white">
+        <span className="line-clamp-2 text-[12.5px] font-medium leading-snug text-[var(--color-fg)] dark:group-hover:text-white">
           {source.title}
         </span>
         <span className="mt-1.5 flex items-center gap-2 text-[10.5px] text-[var(--color-text-muted)]">
