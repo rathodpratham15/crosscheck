@@ -1,49 +1,135 @@
 @import "tailwindcss";
 
-/* Support both class-based (.dark) and system-preference dark mode */
+/* Support dark: prefix on old components — dark is default (html.dark), light via html.light */
 @custom-variant dark (&:where(.dark, .dark *));
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Chivo", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-ink-0: #0a0a0b;
+  --color-ink-1: #121214;
+  --color-ink-2: #18181b;
+  --color-ink-3: #1f1f23;
+  --color-ink-4: #27272a;
+  --color-ink-5: #3f3f46;
+
+  --color-text-primary: #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+
+  --color-line: #27272a;
+  --color-line-strong: #3f3f46;
+
+  --color-accent: #6366f1;
+  --color-accent-hover: #818cf8;
+
+  --color-claude: #94a3b8;
+  --color-gpt: #8b5cf6;
+  --color-gemini: #14b8a6;
+
+  --color-verified: #10b981;
+  --color-checking: #f59e0b;
+  --color-unsupported: #ef4444;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* Dark is default */
+html:not(.light) {
+  color-scheme: dark;
+  --color-bg: var(--color-ink-0);
+  --color-bg-elev: var(--color-ink-1);
+  --color-fg: var(--color-text-primary);
+  --color-fg-muted: var(--color-text-secondary);
+  --color-border: var(--color-line);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not(.light) {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html.light {
+  color-scheme: light;
+  --color-bg: #fafafa;
+  --color-bg-elev: #ffffff;
+  --color-fg: #18181b;
+  --color-fg-muted: #52525b;
+  --color-border: #e4e4e7;
 }
 
-:root.dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-@keyframes fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+::selection {
+  background: rgba(99, 102, 241, 0.35);
+  color: #fff;
 }
 
-@utility animate-fade-in {
-  animation: fade-in 0.35s ease-out;
+/* Subtle grid background */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-position: -1px -1px;
 }
+
+html.light .bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.045) 1px, transparent 1px);
+}
+
+/* Hidden scrollbar (scrollable but no visible bar) */
+.scroll-thin { scrollbar-width: none; }
+.scroll-thin::-webkit-scrollbar { display: none; }
+
+/* Citation pill */
+.cite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin: 0 2px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  vertical-align: 2px;
+  border: 1px solid currentColor;
+  cursor: pointer;
+  transition: background-color 150ms ease-out;
+}
+.cite:hover { background: currentColor; }
+.cite:hover > span { color: var(--color-ink-0); }
+
+/* Animations */
+@keyframes pulseDot {
+  0%, 100% { opacity: 0.25; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.dot-pulse { animation: pulseDot 1.2s ease-in-out infinite; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 240ms ease-out both; }
+.animate-fade-in { animation: fadeUp 240ms ease-out both; }
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.slide-in { animation: slideIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.sheet-up { animation: sheetUp 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
