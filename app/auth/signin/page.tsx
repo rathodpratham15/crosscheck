@@ -15,7 +15,7 @@ export default function SignInPage() {
     setLoading(true);
     setError(null);
     try {
-      await signIn("resend", { email: email.trim(), redirectTo: "/auth/verify" });
+      await signIn("resend", { email: email.trim(), redirectTo: "/" });
     } catch {
       setError("Failed to send magic link. Please try again.");
       setLoading(false);
