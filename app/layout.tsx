@@ -1,22 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemeProvider } from "@/components/theme-provider";
 import { Providers } from "@/components/session-provider";
+import { Header } from "@/components/header";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "crosscheck",
-  description: "Citations you can verify, not just trust.",
+  title: "crosscheck — verified AI research",
+  description:
+    "An AI research assistant that retrieves academic sources and verifies every citation.",
 };
 
 export const viewport: Viewport = {
@@ -30,25 +21,32 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="en" suppressHydrationWarning className="h-full">
       <head>
-        {/* Synchronously apply saved theme before first paint to prevent flash */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin=""
+        />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;500;600;700;800&family=IBM+Plex+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+          rel="stylesheet"
+        />
+        {/* Apply theme before first paint to prevent flash */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{const t=localStorage.getItem('crosscheck-theme');const d=t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);document.documentElement.classList.toggle('light',!d);}catch(e){}`,
+            __html: `(function(){try{var t=localStorage.getItem('crosscheck-theme');if(t==='light'){document.documentElement.classList.add('light');document.documentElement.classList.remove('dark');}else{document.documentElement.classList.remove('light');document.documentElement.classList.add('dark');}}catch(e){}})();`,
           }}
         />
       </head>
-      <body className="flex min-h-full flex-col">
-        <Providers>
-          <div className="fixed top-3 right-4 z-50">
-            <ThemeToggle />
-          </div>
-          {children}
-        </Providers>
+      <body className="flex min-h-full flex-col antialiased">
+        <ThemeProvider>
+          <Providers>
+            <Header />
+            {children}
+          </Providers>
+        </ThemeProvider>
       </body>
     </html>
   );

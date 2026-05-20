@@ -1,0 +1,78 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import { ArrowRight, Sparkles } from "lucide-react";
+
+type Props = {
+  onSubmit: (q: string) => void;
+  busy?: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  compact?: boolean;
+};
+
+export function SearchComposer({
+  onSubmit,
+  busy,
+  value,
+  onChange,
+  placeholder = "Ask anything about AI/ML research…",
+  compact,
+}: Props) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!compact) ref.current?.focus();
+  }, [compact]);
+
+  const submit = () => {
+    const q = value.trim();
+    if (!q || busy) return;
+    onSubmit(q);
+  };
+
+  return (
+    <div
+      className={`relative w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elev)] transition-colors focus-within:border-indigo-500/60 ${
+        compact ? "" : "shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset]"
+      }`}
+    >
+      <textarea
+        ref={ref}
+        rows={compact ? 1 : 3}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            submit();
+          }
+        }}
+        placeholder={placeholder}
+        className="block w-full resize-none bg-transparent px-4 py-3.5 text-[15px] leading-relaxed text-[var(--color-fg)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
+        disabled={busy}
+      />
+      <div className="flex items-center justify-between border-t border-[var(--color-border)] px-3 py-2">
+        <div className="flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+          <Sparkles className="h-3 w-3 text-indigo-400" strokeWidth={1.75} />
+          <span className="font-mono">Claude · GPT-4o mini · Gemini 2.0</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <kbd className="hidden items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-ink-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)] sm:inline-flex">
+            ⌘ ↵
+          </kbd>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy || !value.trim()}
+            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-500 px-3 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-[var(--color-ink-3)] disabled:text-[var(--color-text-muted)]"
+          >
+            <span>{busy ? "Asking…" : "Ask"}</span>
+            <ArrowRight className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,22 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Answer } from "@/components/answer";
-import { AuthButton } from "@/components/auth-button";
-import type { CitationStatus } from "@/components/citation-chip";
-import { ExamplePrompts } from "@/components/example-prompts";
-import {
-  ResearchProgress,
-  type ResearchStep,
-} from "@/components/research-progress";
-import { SearchingIndicator } from "@/components/searching-indicator";
-import {
-  SourceSidePanel,
-  type VerificationDisplay,
-} from "@/components/source-side-panel";
-import { SourceStrip } from "@/components/source-strip";
+import { SearchComposer } from "@/components/search-composer";
+import { EmptyState } from "@/components/empty-state";
+import { StreamingState, type StreamStep } from "@/components/streaming-state";
+import { ResultCard } from "@/components/result-card";
+import { ExploreFurther } from "@/components/explore-further";
+import { FollowUpComposer } from "@/components/follow-up";
+import { SourceDetail } from "@/components/source-detail";
+import type { VerificationDisplay } from "@/components/source-side-panel";
 import { saveConversation, deleteSaved } from "@/lib/saved";
 import type { Source } from "@/lib/tavily";
 
@@ -24,6 +17,15 @@ const MIN_QUERY_LENGTH = 5;
 const MAX_HISTORY = 8;
 const HISTORY_KEY = "crosscheck-history";
 const CACHE_TTL = 24 * 60 * 60 * 1000;
+
+const EXAMPLE_PROMPTS = [
+  "What is Luma AI?",
+  "Chinchilla scaling law explained",
+  "Compare diffusion transformers vs autoregressive models",
+  "State-space models vs transformers — current state of the art",
+  "RLHF vs DPO: what changed in 2024?",
+  "Best benchmarks for code generation models",
+];
 
 type SessionCache = {
   query: string;
@@ -53,37 +55,6 @@ function saveCache(q: string, data: Omit<SessionCache, "cachedAt">) {
       JSON.stringify({ ...data, cachedAt: Date.now() }),
     );
   } catch {}
-}
-
-function getDomain(url: string): string {
-  if (url.includes("arxiv.org")) return "arXiv";
-  if (url.includes("semanticscholar.org")) return "S2";
-  if (url.includes("paperswithcode.com")) return "PwC";
-  if (url.includes("github.com")) return "GitHub";
-  return "Other";
-}
-
-function generateBibtex(sources: Source[], answer: string): string {
-  const cited = new Set<number>();
-  for (const m of answer.matchAll(/\[(\d+)\]/g)) cited.add(Number(m[1]));
-  return sources
-    .filter((s) => cited.has(s.id))
-    .map((s) => {
-      const title = s.title.replace(/[{}]/g, "");
-      return `@misc{crosscheck${s.id},\n  title = {${title}},\n  url   = {${s.url}},\n  note  = {Accessed via crosscheck}\n}`;
-    })
-    .join("\n\n");
-}
-
-function generateMarkdown(
-  query: string,
-  answer: string,
-  sources: Source[],
-): string {
-  const srcBlock = sources
-    .map((s) => `${s.id}. [${s.title}](${s.url})`)
-    .join("\n");
-  return `# ${query}\n\n${answer}\n\n---\n\n## Sources\n\n${srcBlock}`;
 }
 
 type ServerEvent =
@@ -170,8 +141,8 @@ async function streamResearch(
 
 export default function Home() {
   const { data: session } = useSession();
+
   const [query, setQuery] = useState("");
-  const [followUpQuery, setFollowUpQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [answer, setAnswer] = useState("");
@@ -182,16 +153,30 @@ export default function Home() {
   >({});
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [copiedMd, setCopiedMd] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
   const [cachedResult, setCachedResult] = useState(false);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
-  // Search history
   const [history, setHistory] = useState<string[]>([]);
   const historyRef = useRef<string[]>([]);
+
+  // GPT comparison
+  const [gptAnswer, setGptAnswer] = useState("");
+  const [gptSources, setGptSources] = useState<Source[]>([]);
+  const [gptVerifications, setGptVerifications] = useState<
+    Record<number, VerificationDisplay>
+  >({});
+  const [gptIsStreaming, setGptIsStreaming] = useState(false);
+  const [gptError, setGptError] = useState<string | null>(null);
+
+  // Gemini comparison
+  const [geminiAnswer, setGeminiAnswer] = useState("");
+  const [geminiSources, setGeminiSources] = useState<Source[]>([]);
+  const [geminiVerifications, setGeminiVerifications] = useState<
+    Record<number, VerificationDisplay>
+  >({});
+  const [geminiIsStreaming, setGeminiIsStreaming] = useState(false);
+  const [geminiError, setGeminiError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -202,7 +187,7 @@ export default function Home() {
         setHistory(parsed);
       }
     } catch {}
-    // Auto-run search if ?q= is in the URL, restore from cache if available
+
     const q = new URLSearchParams(window.location.search).get("q");
     if (q && q.trim().length >= MIN_QUERY_LENGTH) {
       setQuery(q);
@@ -233,35 +218,6 @@ export default function Home() {
     } catch {}
   }
 
-  function clearHistory() {
-    historyRef.current = [];
-    setHistory([]);
-    try {
-      localStorage.removeItem(HISTORY_KEY);
-    } catch {}
-  }
-
-  // GPT comparison
-  const [gptAnswer, setGptAnswer] = useState("");
-  const [gptSources, setGptSources] = useState<Source[]>([]);
-  const [gptVerifications, setGptVerifications] = useState<
-    Record<number, VerificationDisplay>
-  >({});
-  const [gptIsStreaming, setGptIsStreaming] = useState(false);
-  const [gptError, setGptError] = useState<string | null>(null);
-
-  // Gemini comparison
-  const [geminiAnswer, setGeminiAnswer] = useState("");
-  const [geminiSources, setGeminiSources] = useState<Source[]>([]);
-  const [geminiVerifications, setGeminiVerifications] = useState<
-    Record<number, VerificationDisplay>
-  >({});
-  const [geminiIsStreaming, setGeminiIsStreaming] = useState(false);
-  const [geminiError, setGeminiError] = useState<string | null>(null);
-
-  // Save state
-  const [savedId, setSavedId] = useState<string | null>(null);
-
   async function fetchSuggestions(q: string, ans: string) {
     try {
       const res = await fetch("/api/suggestions", {
@@ -290,7 +246,6 @@ export default function Home() {
     setVerifications({});
     setError(null);
     setIsStreaming(true);
-    setFollowUpQuery("");
     setGptAnswer("");
     setGptSources([]);
     setGptVerifications({});
@@ -300,25 +255,23 @@ export default function Home() {
     setGeminiVerifications({});
     setGeminiError(null);
     setSuggestions([]);
-    setActiveFilters(new Set());
     setSavedId(null);
     setCachedResult(false);
 
-    // Update URL for shareability
-    window.history.replaceState(
-      {},
-      "",
-      `?q=${encodeURIComponent(trimmed)}`,
-    );
+    window.history.replaceState({}, "", `?q=${encodeURIComponent(trimmed)}`);
 
     let accumulatedAnswer = "";
     let localSources: Source[] = [];
     let localVerifications: Record<number, VerificationDisplay> = {};
+
     try {
       await streamResearch(
         { query: trimmed, history: historyArg },
         {
-          onSources: (s) => { localSources = s; setSources(s); },
+          onSources: (s) => {
+            localSources = s;
+            setSources(s);
+          },
           onDelta: (text) => {
             accumulatedAnswer += text;
             setAnswer((prev) => prev + text);
@@ -364,7 +317,6 @@ export default function Home() {
     setGptVerifications({});
     setGptError(null);
     setGptIsStreaming(true);
-
     try {
       await streamResearch(
         { query: submittedQuery, provider: "gpt" },
@@ -399,7 +351,6 @@ export default function Home() {
     setGeminiVerifications({});
     setGeminiError(null);
     setGeminiIsStreaming(true);
-
     try {
       await streamResearch(
         { query: submittedQuery, provider: "gemini" },
@@ -442,7 +393,12 @@ export default function Home() {
           const res = await fetch("/api/saved", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query: submittedQuery, answer, sources, verifications }),
+            body: JSON.stringify({
+              query: submittedQuery,
+              answer,
+              sources,
+              verifications,
+            }),
           });
           if (res.ok) {
             const entry = (await res.json()) as { id: string };
@@ -461,581 +417,313 @@ export default function Home() {
     }
   }
 
-  function handleCopyBibtex() {
-    const bib = generateBibtex(sources, answer);
-    if (!bib) return;
-    void navigator.clipboard.writeText(bib).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
-  function handleCopyMarkdown() {
-    const md = generateMarkdown(submittedQuery, answer, sources);
-    void navigator.clipboard.writeText(md).then(() => {
-      setCopiedMd(true);
-      setTimeout(() => setCopiedMd(false), 2000);
-    });
-  }
-
-  async function handleCopyLink() {
+  async function handleShare() {
     try {
       const res = await fetch("/api/share", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: submittedQuery, answer, sources, verifications }),
+        body: JSON.stringify({
+          query: submittedQuery,
+          answer,
+          sources,
+          verifications,
+        }),
       });
       if (res.ok) {
         const { id } = (await res.json()) as { id: string };
-        await navigator.clipboard.writeText(`${window.location.origin}/share/${id}`);
-        setCopiedLink(true);
-        setTimeout(() => setCopiedLink(false), 2000);
+        await navigator.clipboard.writeText(
+          `${window.location.origin}/share/${id}`,
+        );
         return;
       }
     } catch {}
     await navigator.clipboard.writeText(window.location.href);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
   }
 
-  async function runCompareAll() {
-    await Promise.all([runGptCompare(), runGeminiCompare()]);
-  }
-
-  function handleNewSearch() {
-    if (query.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
+  function handleNewSearch(q: string) {
+    if (q.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
+    setQuery(q);
     setTurns([]);
-    void runSearch(query, []);
+    void runSearch(q, []);
   }
 
-  function handleFollowUp() {
-    if (followUpQuery.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
-
+  function handleFollowUp(q: string) {
+    if (q.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
     const priorHistory = [
       ...turns.map((t) => ({ query: t.query, answer: t.answer })),
       ...(answer ? [{ query: submittedQuery, answer }] : []),
     ];
-
     if (answer) {
       setTurns((prev) => [
         ...prev,
         { query: submittedQuery, answer, sources, verifications },
       ]);
     }
-
-    void runSearch(followUpQuery, priorHistory);
+    void runSearch(q, priorHistory);
   }
 
-  function toggleFilter(domain: string) {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(domain)) next.delete(domain);
-      else next.add(domain);
-      return next;
-    });
+  function handleExplorePick(q: string) {
+    const history = [
+      ...turns.map((t) => ({ query: t.query, answer: t.answer })),
+      ...(answer ? [{ query: submittedQuery, answer }] : []),
+    ];
+    if (answer) {
+      setTurns((prev) => [
+        ...prev,
+        { query: submittedQuery, answer, sources, verifications },
+      ]);
+    }
+    void runSearch(q, history);
   }
 
+  // Derived state
   const hasResult = answer.length > 0 || sources.length > 0;
   const hasCitations =
     answer.length > 0 && /\[\d+\]/.test(answer) && sources.length > 0;
   const hasGptResult = gptAnswer.length > 0 || gptSources.length > 0;
   const hasGeminiResult = geminiAnswer.length > 0 || geminiSources.length > 0;
-  const selectedSource = sources.find((s) => s.id === selectedSourceId) ?? null;
+  const isEmpty =
+    !hasResult && !isStreaming && turns.length === 0 && !error;
 
-  // Source domain filtering
-  const sourceDomains = [...new Set(sources.map((s) => getDomain(s.url)))];
-  const filteredSources =
-    activeFilters.size === 0
-      ? sources
-      : sources.filter((s) => activeFilters.has(getDomain(s.url)));
-
-  // Confidence score
-  const verificationValues = Object.values(verifications);
-  const totalChecked = verificationValues.filter(
-    (v) => v.status !== "checking",
-  ).length;
-  const totalVerified = verificationValues.filter(
-    (v) => v.status === "verified",
-  ).length;
-  const confidenceScore =
-    !isStreaming && totalChecked > 0
-      ? Math.round((totalVerified / totalChecked) * 100)
-      : null;
-  const getStatus = (id: number): CitationStatus | undefined =>
-    verifications[id]?.status;
+  const selectedSource =
+    sources.find((s) => s.id === selectedSourceId) ?? null;
   const selectedVerification = selectedSource
     ? verifications[selectedSource.id]
     : undefined;
-  const isEmpty = !hasResult && !isStreaming && turns.length === 0;
-  const trimmedLen = query.trim().length;
-  const tooShort = trimmedLen > 0 && trimmedLen < MIN_QUERY_LENGTH;
 
-  // Derive streaming step for progress indicator
-  const streamingStep: ResearchStep | null = !isStreaming
-    ? null
-    : sources.length === 0
+  const streamingStep: StreamStep = isStreaming
+    ? sources.length === 0
       ? "searching"
       : Object.values(verifications).some((v) => v.status === "checking")
         ? "verifying"
-        : "generating";
+        : "generating"
+    : "searching";
+
+  const gptStep: StreamStep = gptIsStreaming
+    ? gptSources.length === 0
+      ? "searching"
+      : Object.values(gptVerifications).some((v) => v.status === "checking")
+        ? "verifying"
+        : "generating"
+    : "searching";
+
+  const geminiStep: StreamStep = geminiIsStreaming
+    ? geminiSources.length === 0
+      ? "searching"
+      : Object.values(geminiVerifications).some((v) => v.status === "checking")
+        ? "verifying"
+        : "generating"
+    : "searching";
 
   return (
-    <main
-      className={
-        "mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-6 py-16 " +
-        (isEmpty ? "justify-center" : "")
-      }
-    >
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-semibold tracking-tight">
-            crosscheck<span className="text-indigo-500">.</span>
-          </h1>
-          <p className="mt-2 text-sm text-zinc-500">
-            Citations you can verify, not just trust.
-          </p>
-        </div>
-        <div className="mt-1 flex items-center gap-4">
-          <Link
-            href="/saved"
-            className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
-          >
-            Saved ↗
-          </Link>
-          <AuthButton />
-        </div>
-      </header>
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleNewSearch();
-        }}
-        className="flex flex-col gap-3"
-      >
-        <textarea
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              handleNewSearch();
-            }
-          }}
-          placeholder="Ask anything about AI/ML research…"
-          rows={3}
-          className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm outline-none transition-colors focus:border-indigo-500 dark:border-zinc-800 dark:bg-zinc-950 dark:focus:border-indigo-400"
-          disabled={isStreaming}
-        />
-        <div className="flex items-center justify-between">
-          {tooShort ? (
-            <p className="text-xs text-zinc-500">
-              Type at least {MIN_QUERY_LENGTH} characters
-            </p>
-          ) : (
-            <p className="text-xs text-zinc-500">⌘↵ to ask</p>
-          )}
-          <button
-            type="submit"
-            disabled={isStreaming || trimmedLen < MIN_QUERY_LENGTH}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-600 dark:disabled:hover:bg-indigo-500"
-          >
-            {isStreaming ? "Streaming…" : "Ask"}
-          </button>
-        </div>
-      </form>
-
-      {isEmpty && !error && (
-        <>
-          <ExamplePrompts onSelect={setQuery} />
-          {history.length > 0 && (
-            <div className="animate-fade-in">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Recent
-                </p>
-                <button
-                  type="button"
-                  onClick={clearHistory}
-                  className="text-xs text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
-                >
-                  Clear
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {history.map((h) => (
-                  <button
-                    key={h}
-                    type="button"
-                    onClick={() => setQuery(h)}
-                    className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-900 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
-                  >
-                    {h}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Top-level searching indicator (before any result, first search) */}
-      {isStreaming && sources.length === 0 && turns.length === 0 && (
-        <div className="animate-fade-in">
-          <SearchingIndicator />
-        </div>
-      )}
-
-      {error && (
+    <>
+      <main className="flex-1 bg-grid">
         <div
-          role="alert"
-          aria-live="polite"
-          className="animate-fade-in flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 shadow-sm dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+          className={`mx-auto max-w-[860px] px-5 md:px-8 ${
+            isEmpty
+              ? "flex min-h-[calc(100svh-56px)] flex-col items-center justify-center py-12"
+              : "py-8"
+          }`}
         >
-          <span
-            aria-hidden="true"
-            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-[11px] leading-none font-bold text-white"
-          >
-            !
-          </span>
-          <div className="flex-1">
-            <p className="font-semibold">Something went wrong</p>
-            <p className="mt-0.5 leading-5 opacity-90">{error}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setError(null)}
-            aria-label="Dismiss error"
-            className="-mt-1 -mr-2 rounded p-1 text-red-700 transition-colors hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-900"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+          {/* Hero (empty state) */}
+          {isEmpty && (
+            <>
+              <div className="mb-8 text-center">
+                <h1 className="font-heading text-[28px] font-bold tracking-tight text-[var(--color-fg)] md:text-[36px]">
+                  Ask anything about AI/ML research
+                </h1>
+                <p className="mt-2 font-mono text-[12px] text-[var(--color-text-muted)]">
+                  Every citation verified against its source
+                </p>
+              </div>
+              <div className="w-full max-w-xl">
+                <SearchComposer
+                  value={query}
+                  onChange={setQuery}
+                  onSubmit={handleNewSearch}
+                  busy={isStreaming}
+                />
+              </div>
+              <div className="mt-8 w-full max-w-xl">
+                <EmptyState
+                  examples={EXAMPLE_PROMPTS}
+                  recent={history}
+                  onPick={handleNewSearch}
+                />
+              </div>
+            </>
+          )}
 
-      {turns.map((turn, i) => (
-        <section
-          key={i}
-          className="min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-900"
-        >
-          <p className="mb-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
-            {turn.query}
-          </p>
-          <Answer
-            text={turn.answer}
-            onCitationClick={() => {}}
-            getCitationStatus={(id) => turn.verifications[id]?.status}
-          />
-        </section>
-      ))}
-
-      {(hasResult || (isStreaming && turns.length > 0)) && (
-        <>
-          {isStreaming && sources.length === 0 && (
-            <div className="animate-fade-in">
-              <SearchingIndicator />
+          {/* Active search bar (non-empty state) */}
+          {!isEmpty && (
+            <div className="mb-6">
+              <SearchComposer
+                value={query}
+                onChange={setQuery}
+                onSubmit={handleNewSearch}
+                busy={isStreaming}
+                compact
+              />
             </div>
           )}
-          <section className="animate-fade-in min-w-0 rounded-lg border border-zinc-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
-                  Claude
-                </span>
-                {confidenceScore !== null && (
-                  <span
-                    className={
-                      "rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums " +
-                      (confidenceScore >= 80
-                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                        : confidenceScore >= 50
-                          ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300")
-                    }
-                  >
-                    {confidenceScore}% verified
-                  </span>
-                )}
+
+          {/* Error */}
+          {error && (
+            <div
+              role="alert"
+              className="mb-6 fade-up flex items-start gap-3 rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-300"
+            >
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-[11px] font-bold text-white">
+                !
+              </span>
+              <div className="flex-1">
+                <p className="font-semibold">Something went wrong</p>
+                <p className="mt-0.5 opacity-80">{error}</p>
               </div>
-              {streamingStep && streamingStep !== "searching" && (
-                <ResearchProgress step={streamingStep} />
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="text-red-400 hover:text-red-200"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Prior turns */}
+          {turns.map((turn, i) => (
+            <div
+              key={i}
+              className="mb-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elev)] px-5 py-4 opacity-60"
+            >
+              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+                {turn.query}
+              </p>
+              <p className="line-clamp-3 text-[13.5px] leading-relaxed text-[var(--color-text-secondary)]">
+                {turn.answer.replace(/\[\d+\]/g, "").trim()}
+              </p>
+            </div>
+          ))}
+
+          {/* Streaming state — Claude */}
+          {isStreaming && (
+            <div className="mb-6 fade-up">
+              <StreamingState query={submittedQuery} step={streamingStep} />
+            </div>
+          )}
+
+          {/* Claude result */}
+          {(hasResult || (isStreaming && sources.length > 0)) && (
+            <div className="mb-6">
+              <ResultCard
+                model="claude"
+                answer={answer}
+                sources={sources}
+                verifications={verifications}
+                isPrimary
+                isStreaming={isStreaming}
+                isSaved={!!savedId}
+                onSave={() => void handleSave()}
+                onShare={() => void handleShare()}
+                onSelectSource={setSelectedSourceId}
+                onRunGpt={
+                  hasCitations && !gptIsStreaming
+                    ? () => void runGptCompare()
+                    : undefined
+                }
+                onRunGemini={
+                  hasCitations && !geminiIsStreaming
+                    ? () => void runGeminiCompare()
+                    : undefined
+                }
+                gptDone={hasGptResult || gptIsStreaming}
+                geminiDone={hasGeminiResult || geminiIsStreaming}
+                cachedResult={cachedResult}
+                onRerun={() => {
+                  setCachedResult(false);
+                  void runSearch(submittedQuery, []);
+                }}
+                query={submittedQuery}
+              />
+            </div>
+          )}
+
+          {/* GPT streaming state */}
+          {gptIsStreaming && !hasGptResult && (
+            <div className="mb-6 fade-up">
+              <StreamingState query={submittedQuery} step={gptStep} />
+            </div>
+          )}
+
+          {/* GPT result */}
+          {(hasGptResult || gptIsStreaming) && (
+            <div className="mb-6">
+              {gptError && (
+                <p className="mb-2 text-xs text-red-400">{gptError}</p>
+              )}
+              {(gptAnswer || gptSources.length > 0) && (
+                <ResultCard
+                  model="gpt"
+                  answer={gptAnswer}
+                  sources={gptSources}
+                  verifications={gptVerifications}
+                  isStreaming={gptIsStreaming}
+                  onSelectSource={() => {}}
+                  query={submittedQuery}
+                />
               )}
             </div>
-            {sourceDomains.length > 1 && (
-              <div className="mb-3 flex flex-wrap items-center gap-1.5">
-                {sourceDomains.map((domain) => (
-                  <button
-                    key={domain}
-                    type="button"
-                    onClick={() => toggleFilter(domain)}
-                    className={
-                      "rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors " +
-                      (activeFilters.has(domain)
-                        ? "bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900"
-                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700")
-                    }
-                  >
-                    {domain}
-                  </button>
-                ))}
-                {activeFilters.size > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveFilters(new Set())}
-                    className="text-[11px] text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            )}
-            <SourceStrip
-              sources={filteredSources}
-              selectedId={selectedSourceId}
-              onSelect={setSelectedSourceId}
-              getStatus={getStatus}
-            />
-            <Answer
-              text={answer}
-              onCitationClick={setSelectedSourceId}
-              getCitationStatus={getStatus}
-            />
-            {hasResult && !isStreaming && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                <div className="flex flex-wrap items-center gap-3">
-                  {hasCitations && (
-                    <>
-                      {!hasGptResult && !hasGeminiResult && !gptIsStreaming && !geminiIsStreaming ? (
-                        <button
-                          type="button"
-                          onClick={() => void runCompareAll()}
-                          className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
-                        >
-                          Compare all →
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void runGptCompare()}
-                            disabled={gptIsStreaming}
-                            className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
-                          >
-                            {gptIsStreaming ? "↺ GPT-4o mini" : hasGptResult ? "↺ GPT-4o mini" : "GPT-4o mini →"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void runGeminiCompare()}
-                            disabled={geminiIsStreaming}
-                            className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
-                          >
-                            {geminiIsStreaming ? "↺ Gemini" : hasGeminiResult ? "↺ Gemini" : "Gemini →"}
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {cachedResult && (
-                    <button
-                      type="button"
-                      onClick={() => { setCachedResult(false); void runSearch(submittedQuery, []); }}
-                      className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
-                    >
-                      ↺ Re-run
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => void handleSave()}
-                    className={
-                      "text-xs transition-colors " +
-                      (savedId
-                        ? "text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300"
-                        : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200")
-                    }
-                  >
-                    {savedId ? "Saved ★" : "Save ☆"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleCopyLink()}
-                    className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
-                  >
-                    {copiedLink ? "Copied!" : "Share ↗"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCopyMarkdown}
-                    className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
-                  >
-                    {copiedMd ? "Copied!" : "Markdown"}
-                  </button>
-                  {hasCitations && (
-                    <button
-                      type="button"
-                      onClick={handleCopyBibtex}
-                      className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
-                    >
-                      {copied ? "Copied!" : "BibTeX"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-
-      {/* GPT-4o comparison result */}
-      {(hasGptResult || gptIsStreaming) && (
-        <section className="animate-fade-in min-w-0 rounded-lg border border-violet-200 bg-white px-4 py-4 dark:border-violet-900 dark:bg-zinc-950">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-violet-500">
-              GPT-4o mini
-            </span>
-            {gptIsStreaming && (
-              <ResearchProgress
-                step={
-                  gptSources.length === 0
-                    ? "searching"
-                    : Object.values(gptVerifications).some(
-                          (v) => v.status === "checking",
-                        )
-                      ? "verifying"
-                      : "generating"
-                }
-              />
-            )}
-          </div>
-          {gptIsStreaming && gptSources.length === 0 && <SearchingIndicator />}
-          <SourceStrip
-            sources={gptSources}
-            selectedId={null}
-            onSelect={() => {}}
-            getStatus={(id) => gptVerifications[id]?.status}
-          />
-          <Answer
-            text={gptAnswer}
-            onCitationClick={() => {}}
-            getCitationStatus={(id) => gptVerifications[id]?.status}
-          />
-          {gptError && (
-            <p className="mt-2 text-xs text-red-500">{gptError}</p>
           )}
-        </section>
-      )}
 
-      {/* Gemini comparison result */}
-      {(hasGeminiResult || geminiIsStreaming) && (
-        <section className="animate-fade-in min-w-0 rounded-lg border border-teal-200 bg-white px-4 py-4 dark:border-teal-900 dark:bg-zinc-950">
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-teal-500">
-              Gemini 2.0 Flash
-            </span>
-            {geminiIsStreaming && (
-              <ResearchProgress
-                step={
-                  geminiSources.length === 0
-                    ? "searching"
-                    : Object.values(geminiVerifications).some(
-                          (v) => v.status === "checking",
-                        )
-                      ? "verifying"
-                      : "generating"
-                }
-              />
-            )}
-          </div>
-          {geminiIsStreaming && geminiSources.length === 0 && (
-            <SearchingIndicator />
+          {/* Gemini streaming state */}
+          {geminiIsStreaming && !hasGeminiResult && (
+            <div className="mb-6 fade-up">
+              <StreamingState query={submittedQuery} step={geminiStep} />
+            </div>
           )}
-          <SourceStrip
-            sources={geminiSources}
-            selectedId={null}
-            onSelect={() => {}}
-            getStatus={(id) => geminiVerifications[id]?.status}
-          />
-          <Answer
-            text={geminiAnswer}
-            onCitationClick={() => {}}
-            getCitationStatus={(id) => geminiVerifications[id]?.status}
-          />
-          {geminiError && (
-            <p className="mt-2 text-xs text-red-500">{geminiError}</p>
-          )}
-        </section>
-      )}
 
-      {suggestions.length > 0 && !isStreaming && (
-        <div className="animate-fade-in">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
-            Explore further
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {suggestions.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => {
-                  const history = [
-                    ...turns.map((t) => ({ query: t.query, answer: t.answer })),
-                    ...(answer ? [{ query: submittedQuery, answer }] : []),
-                  ];
-                  if (answer) {
-                    setTurns((prev) => [
-                      ...prev,
-                      { query: submittedQuery, answer, sources, verifications },
-                    ]);
-                  }
-                  void runSearch(s, history);
-                }}
-                className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs text-zinc-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-indigo-800 dark:hover:bg-indigo-950 dark:hover:text-indigo-300"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+          {/* Gemini result */}
+          {(hasGeminiResult || geminiIsStreaming) && (
+            <div className="mb-6">
+              {geminiError && (
+                <p className="mb-2 text-xs text-red-400">{geminiError}</p>
+              )}
+              {(geminiAnswer || geminiSources.length > 0) && (
+                <ResultCard
+                  model="gemini"
+                  answer={geminiAnswer}
+                  sources={geminiSources}
+                  verifications={geminiVerifications}
+                  isStreaming={geminiIsStreaming}
+                  onSelectSource={() => {}}
+                  query={submittedQuery}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Explore further */}
+          {suggestions.length > 0 && !isStreaming && (
+            <div className="mb-6 fade-up">
+              <ExploreFurther items={suggestions} onPick={handleExplorePick} />
+            </div>
+          )}
+
+          {/* Follow-up */}
+          {hasResult && !isStreaming && (
+            <div className="mb-6">
+              <FollowUpComposer onSubmit={handleFollowUp} />
+            </div>
+          )}
         </div>
-      )}
+      </main>
 
-      {hasResult && !isStreaming && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleFollowUp();
-          }}
-          className="flex gap-2"
-        >
-          <textarea
-            value={followUpQuery}
-            onChange={(e) => setFollowUpQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault();
-                handleFollowUp();
-              }
-            }}
-            placeholder="Ask a follow-up…"
-            rows={2}
-            className="flex-1 resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm outline-none transition-colors focus:border-indigo-500 dark:border-zinc-800 dark:bg-zinc-950 dark:focus:border-indigo-400"
-          />
-          <button
-            type="submit"
-            disabled={followUpQuery.trim().length < MIN_QUERY_LENGTH}
-            className="self-end rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
-          >
-            Follow up ↩
-          </button>
-        </form>
-      )}
-
-      <SourceSidePanel
+      {/* Source detail overlay */}
+      <SourceDetail
         source={selectedSource}
         verification={selectedVerification}
         onClose={() => setSelectedSourceId(null)}
       />
-    </main>
+    </>
   );
 }
