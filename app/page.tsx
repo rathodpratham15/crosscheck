@@ -75,6 +75,12 @@ type Turn = {
   answer: string;
   sources: Source[];
   verifications: Record<number, VerificationDisplay>;
+  gptAnswer?: string;
+  gptSources?: Source[];
+  gptVerifications?: Record<number, VerificationDisplay>;
+  geminiAnswer?: string;
+  geminiSources?: Source[];
+  geminiVerifications?: Record<number, VerificationDisplay>;
 };
 
 async function streamResearch(
@@ -235,6 +241,7 @@ export default function Home() {
   async function runSearch(
     q: string,
     historyArg: { query: string; answer: string }[],
+    priorTurns: Turn[] = [],
   ) {
     const trimmed = q.trim();
     if (trimmed.length < MIN_QUERY_LENGTH || isStreaming) return;
@@ -300,7 +307,7 @@ export default function Home() {
           answer: accumulatedAnswer,
           sources: localSources,
           verifications: localVerifications,
-          turns: [],
+          turns: priorTurns,
         });
       }
     } catch (err) {
@@ -440,9 +447,24 @@ export default function Home() {
     await navigator.clipboard.writeText(window.location.href);
   }
 
+  function buildCurrentTurn(): Turn {
+    return {
+      query: submittedQuery,
+      answer,
+      sources,
+      verifications,
+      ...(gptAnswer || gptSources.length > 0
+        ? { gptAnswer, gptSources, gptVerifications }
+        : {}),
+      ...(geminiAnswer || geminiSources.length > 0
+        ? { geminiAnswer, geminiSources, geminiVerifications }
+        : {}),
+    };
+  }
+
   function handleNewSearch(q: string) {
     if (q.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
-    setQuery(q);
+    setQuery("");
     setTurns([]);
     void runSearch(q, []);
   }
@@ -453,13 +475,10 @@ export default function Home() {
       ...turns.map((t) => ({ query: t.query, answer: t.answer })),
       ...(answer ? [{ query: submittedQuery, answer }] : []),
     ];
-    if (answer) {
-      setTurns((prev) => [
-        ...prev,
-        { query: submittedQuery, answer, sources, verifications },
-      ]);
-    }
-    void runSearch(q, priorHistory);
+    const newTurns = answer ? [...turns, buildCurrentTurn()] : turns;
+    if (answer) setTurns(newTurns);
+    setQuery("");
+    void runSearch(q, priorHistory, newTurns);
   }
 
   function handleExplorePick(q: string) {
@@ -467,13 +486,10 @@ export default function Home() {
       ...turns.map((t) => ({ query: t.query, answer: t.answer })),
       ...(answer ? [{ query: submittedQuery, answer }] : []),
     ];
-    if (answer) {
-      setTurns((prev) => [
-        ...prev,
-        { query: submittedQuery, answer, sources, verifications },
-      ]);
-    }
-    void runSearch(q, history);
+    const newTurns = answer ? [...turns, buildCurrentTurn()] : turns;
+    if (answer) setTurns(newTurns);
+    setQuery("");
+    void runSearch(q, history, newTurns);
   }
 
   // Derived state
@@ -590,61 +606,110 @@ export default function Home() {
             </div>
           )}
 
-          {/* Prior turns */}
-          {turns.map((turn, i) => (
-            <div
-              key={i}
-              className="mb-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elev)] px-5 py-4 opacity-60"
-            >
-              <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
-                {turn.query}
-              </p>
-              <p className="line-clamp-3 text-[13.5px] leading-relaxed text-[var(--color-text-secondary)]">
-                {turn.answer.replace(/\[\d+\]/g, "").trim()}
-              </p>
-            </div>
-          ))}
+          {/* Prior turns — unified Q+A block per turn */}
+          {turns.map((turn, i) => {
+            const hasTurnGpt = !!(turn.gptAnswer || (turn.gptSources?.length ?? 0) > 0);
+            const hasTurnLlama = !!(turn.geminiAnswer || (turn.geminiSources?.length ?? 0) > 0);
+            return (
+              <div
+                key={i}
+                className="fade-up mb-6 overflow-hidden rounded-xl border border-[var(--color-border)] opacity-70"
+                style={{ borderLeftWidth: 2, borderLeftColor: "var(--color-claude)" }}
+              >
+                {/* Question header */}
+                <div className="border-b border-[var(--color-border)] px-5 py-4">
+                  <p className="font-heading text-[15px] font-semibold leading-snug text-[var(--color-fg)]">
+                    {turn.query}
+                  </p>
+                </div>
+                {/* Claude answer */}
+                <ResultCard
+                  nested
+                  model="claude"
+                  answer={turn.answer}
+                  sources={turn.sources}
+                  verifications={turn.verifications}
+                  initialCollapsed
+                  onSelectSource={setSelectedSourceId}
+                  query={turn.query}
+                />
+                {/* GPT answer if it existed */}
+                {hasTurnGpt && (
+                  <div className="border-t border-[var(--color-border)]">
+                    <ResultCard
+                      nested
+                      model="gpt"
+                      answer={turn.gptAnswer ?? ""}
+                      sources={turn.gptSources ?? []}
+                      verifications={turn.gptVerifications ?? {}}
+                      initialCollapsed
+                      onSelectSource={setSelectedSourceId}
+                      query={turn.query}
+                    />
+                  </div>
+                )}
+                {/* Llama answer if it existed */}
+                {hasTurnLlama && (
+                  <div className="border-t border-[var(--color-border)]">
+                    <ResultCard
+                      nested
+                      model="gemini"
+                      answer={turn.geminiAnswer ?? ""}
+                      sources={turn.geminiSources ?? []}
+                      verifications={turn.geminiVerifications ?? {}}
+                      initialCollapsed
+                      onSelectSource={setSelectedSourceId}
+                      query={turn.query}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
-          {/* Streaming state — Claude */}
-          {isStreaming && (
-            <div className="mb-6 fade-up">
-              <StreamingState query={submittedQuery} step={streamingStep} />
-            </div>
-          )}
-
-          {/* Claude result */}
-          {(hasResult || (isStreaming && sources.length > 0)) && (
+          {/* Active turn — unified Q+A card */}
+          {(isStreaming || hasResult) && (
             <div className="mb-6">
-              <ResultCard
-                model="claude"
-                answer={answer}
-                sources={sources}
-                verifications={verifications}
-                isPrimary
-                isStreaming={isStreaming}
-                isSaved={!!savedId}
-                onSave={() => void handleSave()}
-                onShare={() => void handleShare()}
-                onSelectSource={setSelectedSourceId}
-                onRunGpt={
-                  hasCitations && !gptIsStreaming
-                    ? () => void runGptCompare()
-                    : undefined
-                }
-                onRunGemini={
-                  hasCitations && !geminiIsStreaming
-                    ? () => void runGeminiCompare()
-                    : undefined
-                }
-                gptDone={hasGptResult || gptIsStreaming}
-                geminiDone={hasGeminiResult || geminiIsStreaming}
-                cachedResult={cachedResult}
-                onRerun={() => {
-                  setCachedResult(false);
-                  void runSearch(submittedQuery, []);
-                }}
-                query={submittedQuery}
-              />
+              {/* Streaming state shown above the card while sources haven't arrived yet */}
+              {isStreaming && sources.length === 0 && (
+                <div className="mb-3 fade-up">
+                  <StreamingState query={submittedQuery} step={streamingStep} />
+                </div>
+              )}
+
+              {(hasResult || (isStreaming && sources.length > 0)) && (
+                <ResultCard
+                  model="claude"
+                  answer={answer}
+                  sources={sources}
+                  verifications={verifications}
+                  showQuery
+                  isPrimary
+                  isStreaming={isStreaming}
+                  isSaved={!!savedId}
+                  onSave={() => void handleSave()}
+                  onShare={() => void handleShare()}
+                  onSelectSource={setSelectedSourceId}
+                  onRunGpt={
+                    hasCitations && !gptIsStreaming
+                      ? () => void runGptCompare()
+                      : undefined
+                  }
+                  onRunGemini={
+                    hasCitations && !geminiIsStreaming
+                      ? () => void runGeminiCompare()
+                      : undefined
+                  }
+                  gptDone={hasGptResult || gptIsStreaming}
+                  geminiDone={hasGeminiResult || geminiIsStreaming}
+                  cachedResult={cachedResult}
+                  onRerun={() => {
+                    setCachedResult(false);
+                    void runSearch(submittedQuery, []);
+                  }}
+                  query={submittedQuery}
+                />
+              )}
             </div>
           )}
 

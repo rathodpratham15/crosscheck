@@ -65,6 +65,9 @@ type ResultCardProps = {
   sources: Source[];
   verifications: Record<number, VerificationDisplay>;
   isPrimary?: boolean;
+  initialCollapsed?: boolean;
+  showQuery?: boolean;
+  nested?: boolean;
   isStreaming?: boolean;
   isSaved?: boolean;
   onSave?: () => void;
@@ -85,6 +88,9 @@ export function ResultCard({
   sources,
   verifications,
   isPrimary,
+  initialCollapsed = false,
+  showQuery = false,
+  nested = false,
   isStreaming,
   isSaved,
   onSave,
@@ -99,7 +105,7 @@ export function ResultCard({
   query,
 }: ResultCardProps) {
   const [filter, setFilter] = useState<DomainFilter>("all");
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
 
   const getVerification = (id: number): CitationStatus | undefined =>
     verifications[id]?.status;
@@ -143,10 +149,23 @@ export function ResultCard({
 
   return (
     <article
-      className="fade-up relative overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elev)]"
-      style={{ borderLeftWidth: 2, borderLeftColor: accent }}
+      className={
+        nested
+          ? "relative overflow-hidden bg-[var(--color-bg-elev)]"
+          : "fade-up relative overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elev)]"
+      }
+      style={nested ? undefined : { borderLeftWidth: 2, borderLeftColor: accent }}
     >
-      {/* Header */}
+      {/* Question header */}
+      {showQuery && query && (
+        <div className="border-b border-[var(--color-border)] px-5 py-4">
+          <p className="font-heading text-[15px] font-semibold leading-snug text-[var(--color-fg)]">
+            {query}
+          </p>
+        </div>
+      )}
+
+      {/* Model header */}
       <div className="flex items-center gap-3 border-b border-[var(--color-border)] px-5 py-3">
         <span
           className="inline-flex h-2 w-2 rounded-full"
@@ -168,19 +187,17 @@ export function ResultCard({
             <span>verified</span>
           </span>
         )}
-        {!isPrimary && (
-          <button
-            type="button"
-            onClick={() => setCollapsed((v) => !v)}
-            className="ml-auto inline-flex items-center gap-1 rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 text-[10.5px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-ink-2)] hover:text-[var(--color-fg)]"
-          >
-            <ChevronDown
-              className={`h-3 w-3 transition-transform ${collapsed ? "-rotate-90" : "rotate-0"}`}
-              strokeWidth={2}
-            />
-            <span>{collapsed ? "Expand" : "Collapse"}</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="ml-auto inline-flex items-center gap-1 rounded-sm border border-[var(--color-border)] px-1.5 py-0.5 text-[10.5px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-ink-2)] hover:text-[var(--color-fg)]"
+        >
+          <ChevronDown
+            className={`h-3 w-3 transition-transform ${collapsed ? "-rotate-90" : "rotate-0"}`}
+            strokeWidth={2}
+          />
+          <span>{collapsed ? "Expand" : "Collapse"}</span>
+        </button>
       </div>
 
       {!collapsed && (
