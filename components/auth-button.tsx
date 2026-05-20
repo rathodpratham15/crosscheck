@@ -13,7 +13,7 @@ export function AuthButton() {
   if (session?.user) {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-xs text-zinc-500 truncate max-w-[120px]">
+        <span className="text-xs text-zinc-400 dark:text-zinc-300 truncate max-w-[140px]">
           {session.user.email}
         </span>
         <button
