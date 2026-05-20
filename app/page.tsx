@@ -710,67 +710,35 @@ export default function Home() {
                 {/* Viewing a past conversation */}
                 {viewingConvIndex !== null && pastConversations[viewingConvIndex] && (
                   <>
-                    {pastConversations[viewingConvIndex]!.turns.map((turn, i) => (
-                      <div key={i} className={`mb-6 ${i < pastConversations[viewingConvIndex]!.turns.length - 1 ? "opacity-80" : ""}`}>
-                        <ResultCard
-                          model="claude"
-                          answer={turn.answer}
-                          sources={turn.sources}
-                          verifications={turn.verifications}
-                          showQuery
-                          initialCollapsed={i < pastConversations[viewingConvIndex]!.turns.length - 1}
+                    {pastConversations[viewingConvIndex]!.turns.map((turn, i) => {
+                      const isLast = i === pastConversations[viewingConvIndex]!.turns.length - 1;
+                      return (
+                        <TurnBlock
+                          key={i}
+                          turn={turn}
+                          collapsed={!isLast}
+                          dimmed={!isLast}
                           onSelectSource={setSelectedSourceId}
-                          onSave={() => void saveTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
-                          onShare={() => void shareTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
-                          query={turn.query}
+                          onSave={saveTurnData}
+                          onShare={shareTurnData}
                         />
-                        {turn.gptAnswer && (
-                          <div className="mt-3">
-                            <ResultCard model="gpt" answer={turn.gptAnswer} sources={turn.gptSources ?? []} verifications={turn.gptVerifications ?? {}} initialCollapsed onSelectSource={setSelectedSourceId} query={turn.query} />
-                          </div>
-                        )}
-                        {turn.geminiAnswer && (
-                          <div className="mt-3">
-                            <ResultCard model="gemini" answer={turn.geminiAnswer} sources={turn.geminiSources ?? []} verifications={turn.geminiVerifications ?? {}} initialCollapsed onSelectSource={setSelectedSourceId} query={turn.query} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </>
                 )}
 
-                {/* Current conversation — all turns stacked + active result */}
-                {viewingConvIndex === null && (
-                  <>
-                    {/* Prior turns within this conversation */}
-                    {turns.map((turn, i) => (
-                      <div key={i} className="mb-6 opacity-75">
-                        <ResultCard
-                          model="claude"
-                          answer={turn.answer}
-                          sources={turn.sources}
-                          verifications={turn.verifications}
-                          showQuery
-                          initialCollapsed
-                          onSelectSource={setSelectedSourceId}
-                          onSave={() => void saveTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
-                          onShare={() => void shareTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
-                          query={turn.query}
-                        />
-                        {turn.gptAnswer && (
-                          <div className="mt-3">
-                            <ResultCard model="gpt" answer={turn.gptAnswer} sources={turn.gptSources ?? []} verifications={turn.gptVerifications ?? {}} initialCollapsed onSelectSource={setSelectedSourceId} query={turn.query} />
-                          </div>
-                        )}
-                        {turn.geminiAnswer && (
-                          <div className="mt-3">
-                            <ResultCard model="gemini" answer={turn.geminiAnswer} sources={turn.geminiSources ?? []} verifications={turn.geminiVerifications ?? {}} initialCollapsed onSelectSource={setSelectedSourceId} query={turn.query} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </>
-                )}
+                {/* Prior turns within the current conversation */}
+                {viewingConvIndex === null && turns.map((turn, i) => (
+                  <TurnBlock
+                    key={i}
+                    turn={turn}
+                    collapsed
+                    dimmed
+                    onSelectSource={setSelectedSourceId}
+                    onSave={saveTurnData}
+                    onShare={shareTurnData}
+                  />
+                ))}
 
                 {/* Current conversation — prior turns stacked + active result */}
                 {viewingConvIndex === null && (
@@ -898,5 +866,86 @@ export default function Home() {
         onClose={() => setSelectedSourceId(null)}
       />
     </>
+  );
+}
+
+// Unified Q+A block: question header + all model cards nested inside one container
+function TurnBlock({
+  turn,
+  collapsed,
+  dimmed,
+  onSelectSource,
+  onSave,
+  onShare,
+}: {
+  turn: {
+    query: string;
+    answer: string;
+    sources: Source[];
+    verifications: Record<number, VerificationDisplay>;
+    gptAnswer?: string;
+    gptSources?: Source[];
+    gptVerifications?: Record<number, VerificationDisplay>;
+    geminiAnswer?: string;
+    geminiSources?: Source[];
+    geminiVerifications?: Record<number, VerificationDisplay>;
+  };
+  collapsed?: boolean;
+  dimmed?: boolean;
+  onSelectSource: (id: number) => void;
+  onSave: (q: string, a: string, s: Source[], v: Record<number, VerificationDisplay>) => Promise<string | null>;
+  onShare: (q: string, a: string, s: Source[], v: Record<number, VerificationDisplay>) => Promise<void>;
+}) {
+  return (
+    <div
+      className={`mb-6 overflow-hidden rounded-xl border border-[var(--color-border)] transition-opacity ${dimmed ? "opacity-70" : ""}`}
+      style={{ borderLeftWidth: 2, borderLeftColor: "var(--color-claude)" }}
+    >
+      <div className="border-b border-[var(--color-border)] px-5 py-4">
+        <p className="font-heading text-[15px] font-semibold leading-snug text-[var(--color-fg)]">
+          {turn.query}
+        </p>
+      </div>
+      <ResultCard
+        nested
+        model="claude"
+        answer={turn.answer}
+        sources={turn.sources}
+        verifications={turn.verifications}
+        initialCollapsed={collapsed}
+        onSelectSource={onSelectSource}
+        onSave={() => void onSave(turn.query, turn.answer, turn.sources, turn.verifications)}
+        onShare={() => void onShare(turn.query, turn.answer, turn.sources, turn.verifications)}
+        query={turn.query}
+      />
+      {turn.gptAnswer && (
+        <div className="border-t border-[var(--color-border)]">
+          <ResultCard
+            nested
+            model="gpt"
+            answer={turn.gptAnswer}
+            sources={turn.gptSources ?? []}
+            verifications={turn.gptVerifications ?? {}}
+            initialCollapsed={collapsed}
+            onSelectSource={onSelectSource}
+            query={turn.query}
+          />
+        </div>
+      )}
+      {turn.geminiAnswer && (
+        <div className="border-t border-[var(--color-border)]">
+          <ResultCard
+            nested
+            model="gemini"
+            answer={turn.geminiAnswer}
+            sources={turn.geminiSources ?? []}
+            verifications={turn.geminiVerifications ?? {}}
+            initialCollapsed={collapsed}
+            onSelectSource={onSelectSource}
+            query={turn.query}
+          />
+        </div>
+      )}
+    </div>
   );
 }
