@@ -36,3 +36,33 @@ export async function createSaved(
 export async function deleteSavedDb(userId: string, id: string): Promise<void> {
   await sql`DELETE FROM cc_saved WHERE id = ${id} AND user_id = ${userId}`;
 }
+
+// ── Public shares ─────────────────────────────────────────────────────────────
+
+export type DbShare = {
+  id: string;
+  query: string;
+  answer: string;
+  sources: Source[];
+  verifications: Record<number, VerificationDisplay>;
+  created_at: string;
+};
+
+export async function createShare(
+  data: Omit<DbShare, "id" | "created_at">,
+): Promise<string> {
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const sourcesJson = JSON.stringify(data.sources);
+  const verifJson = JSON.stringify(data.verifications);
+  await sql`
+    INSERT INTO cc_shares (id, query, answer, sources, verifications)
+    VALUES (${id}, ${data.query}, ${data.answer}, ${sourcesJson}::jsonb, ${verifJson}::jsonb)`;
+  return id;
+}
+
+export async function getShare(id: string): Promise<DbShare | null> {
+  const rows = await sql`
+    SELECT id, query, answer, sources, verifications, created_at
+    FROM cc_shares WHERE id = ${id}`;
+  return rows.length ? (rows[0] as DbShare) : null;
+}
