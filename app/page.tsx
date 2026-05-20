@@ -648,8 +648,8 @@ export default function Home() {
             </div>
           )}
 
-          {/* GPT streaming state */}
-          {gptIsStreaming && !hasGptResult && (
+          {/* GPT streaming state — shown while searching (before sources arrive) */}
+          {gptIsStreaming && gptSources.length === 0 && (
             <div className="mb-6 fade-up">
               <StreamingState query={submittedQuery} step={gptStep} />
             </div>
@@ -675,8 +675,8 @@ export default function Home() {
             </div>
           )}
 
-          {/* Gemini streaming state */}
-          {geminiIsStreaming && !hasGeminiResult && (
+          {/* Gemini streaming state — shown while searching (before sources arrive) */}
+          {geminiIsStreaming && geminiSources.length === 0 && (
             <div className="mb-6 fade-up">
               <StreamingState query={submittedQuery} step={geminiStep} />
             </div>

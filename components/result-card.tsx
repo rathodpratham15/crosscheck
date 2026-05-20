@@ -99,7 +99,7 @@ export function ResultCard({
   query,
 }: ResultCardProps) {
   const [filter, setFilter] = useState<DomainFilter>("all");
-  const [collapsed, setCollapsed] = useState(!isPrimary);
+  const [collapsed, setCollapsed] = useState(false);
 
   const getVerification = (id: number): CitationStatus | undefined =>
     verifications[id]?.status;
@@ -207,7 +207,7 @@ export function ResultCard({
           )}
 
           {/* Answer body */}
-          {answer && (
+          {answer ? (
             <div className="px-5 py-5 md:px-7 md:py-6">
               <MarkdownAnswer
                 text={answer}
@@ -216,7 +216,15 @@ export function ResultCard({
                 onCite={onSelectSource}
               />
             </div>
-          )}
+          ) : isStreaming && sources.length > 0 ? (
+            <div className="space-y-2 px-5 py-5 md:px-7 md:py-6">
+              <div className="h-3 w-3/4 animate-pulse rounded bg-[var(--color-ink-4)]" />
+              <div className="h-3 w-full animate-pulse rounded bg-[var(--color-ink-4)]" />
+              <div className="h-3 w-5/6 animate-pulse rounded bg-[var(--color-ink-4)]" />
+              <div className="mt-1 h-3 w-full animate-pulse rounded bg-[var(--color-ink-4)]" />
+              <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--color-ink-4)]" />
+            </div>
+          ) : null}
 
           {/* Footer */}
           {!isStreaming && (answer || sources.length > 0) && (
