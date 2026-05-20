@@ -385,6 +385,52 @@ export default function Home() {
     }
   }
 
+  async function saveTurnData(
+    q: string,
+    ans: string,
+    srcs: Source[],
+    verifs: Record<number, VerificationDisplay>,
+  ): Promise<string | null> {
+    if (session?.user) {
+      try {
+        const res = await fetch("/api/saved", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: q, answer: ans, sources: srcs, verifications: verifs }),
+        });
+        if (res.ok) {
+          const entry = (await res.json()) as { id: string };
+          return entry.id;
+        }
+      } catch {}
+    } else {
+      const entry = saveConversation({ query: q, answer: ans, sources: srcs, verifications: verifs });
+      return entry.id;
+    }
+    return null;
+  }
+
+  async function shareTurnData(
+    q: string,
+    ans: string,
+    srcs: Source[],
+    verifs: Record<number, VerificationDisplay>,
+  ) {
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, answer: ans, sources: srcs, verifications: verifs }),
+      });
+      if (res.ok) {
+        const { id } = (await res.json()) as { id: string };
+        await navigator.clipboard.writeText(`${window.location.origin}/share/${id}`);
+        return;
+      }
+    } catch {}
+    await navigator.clipboard.writeText(window.location.href);
+  }
+
   async function handleSave() {
     if (!answer || !submittedQuery) return;
     if (savedId) {
@@ -395,32 +441,8 @@ export default function Home() {
       }
       setSavedId(null);
     } else {
-      if (session?.user) {
-        try {
-          const res = await fetch("/api/saved", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              query: submittedQuery,
-              answer,
-              sources,
-              verifications,
-            }),
-          });
-          if (res.ok) {
-            const entry = (await res.json()) as { id: string };
-            setSavedId(entry.id);
-          }
-        } catch {}
-      } else {
-        const entry = saveConversation({
-          query: submittedQuery,
-          answer,
-          sources,
-          verifications,
-        });
-        setSavedId(entry.id);
-      }
+      const id = await saveTurnData(submittedQuery, answer, sources, verifications);
+      if (id) setSavedId(id);
     }
   }
 
@@ -631,6 +653,8 @@ export default function Home() {
                   verifications={turn.verifications}
                   initialCollapsed
                   onSelectSource={setSelectedSourceId}
+                  onSave={() => void saveTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
+                  onShare={() => void shareTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
                   query={turn.query}
                 />
                 {/* GPT answer if it existed */}
@@ -644,6 +668,8 @@ export default function Home() {
                       verifications={turn.gptVerifications ?? {}}
                       initialCollapsed
                       onSelectSource={setSelectedSourceId}
+                      onSave={() => void saveTurnData(turn.query, turn.gptAnswer ?? "", turn.gptSources ?? [], turn.gptVerifications ?? {})}
+                      onShare={() => void shareTurnData(turn.query, turn.gptAnswer ?? "", turn.gptSources ?? [], turn.gptVerifications ?? {})}
                       query={turn.query}
                     />
                   </div>
@@ -659,6 +685,8 @@ export default function Home() {
                       verifications={turn.geminiVerifications ?? {}}
                       initialCollapsed
                       onSelectSource={setSelectedSourceId}
+                      onSave={() => void saveTurnData(turn.query, turn.geminiAnswer ?? "", turn.geminiSources ?? [], turn.geminiVerifications ?? {})}
+                      onShare={() => void shareTurnData(turn.query, turn.geminiAnswer ?? "", turn.geminiSources ?? [], turn.geminiVerifications ?? {})}
                       query={turn.query}
                     />
                   </div>

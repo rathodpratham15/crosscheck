@@ -51,6 +51,11 @@ html.light {
   --color-fg: #18181b;
   --color-fg-muted: #52525b;
   --color-border: #e4e4e7;
+  --color-ink-2: #f4f4f5;
+  --color-ink-3: #e4e4e7;
+  --color-ink-4: #d4d4d8;
+  --color-text-muted: #a1a1aa;
+  --color-text-secondary: #71717a;
 }
 
 html,
@@ -60,6 +65,10 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+button, a, [role="button"] {
+  cursor: pointer;
 }
 
 ::selection {
