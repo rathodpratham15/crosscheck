@@ -2,19 +2,65 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { deleteSaved, loadSaved, type SavedConversation } from "@/lib/saved";
+import { loadSaved, deleteSaved, type SavedConversation } from "@/lib/saved";
+import type { DbSaved } from "@/lib/db";
+
+type Item = {
+  id: string;
+  query: string;
+  answer: string;
+  sources: { length: number } | unknown[];
+  savedAt: number;
+};
+
+function toItem(c: SavedConversation): Item {
+  return { id: c.id, query: c.query, answer: c.answer, sources: c.sources, savedAt: c.savedAt };
+}
+
+function toItemFromDb(c: DbSaved): Item {
+  return {
+    id: c.id,
+    query: c.query,
+    answer: c.answer,
+    sources: c.sources,
+    savedAt: c.saved_at,
+  };
+}
 
 export default function SavedPage() {
-  const [items, setItems] = useState<SavedConversation[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [isCloud, setIsCloud] = useState(false);
 
   useEffect(() => {
-    setItems(loadSaved());
+    async function load() {
+      try {
+        const res = await fetch("/api/saved");
+        if (res.ok) {
+          const data = (await res.json()) as DbSaved[];
+          setItems(data.map(toItemFromDb));
+          setIsCloud(true);
+          return;
+        }
+      } catch {}
+      setItems(loadSaved().map(toItem));
+      setIsCloud(false);
+    }
+    void load();
   }, []);
 
-  function handleDelete(id: string) {
-    deleteSaved(id);
+  async function handleDelete(id: string) {
+    if (isCloud) {
+      await fetch(`/api/saved/${id}`, { method: "DELETE" });
+    } else {
+      deleteSaved(id);
+    }
     setItems((prev) => prev.filter((c) => c.id !== id));
   }
+
+  const sourceCount = (sources: unknown): number => {
+    if (Array.isArray(sources)) return sources.length;
+    return 0;
+  };
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
@@ -29,6 +75,9 @@ export default function SavedPage() {
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">
             Saved conversations
           </h1>
+          {isCloud && (
+            <p className="mt-0.5 text-xs text-indigo-500">Synced to your account</p>
+          )}
         </div>
         {items.length > 0 && (
           <span className="text-sm text-zinc-400">{items.length} saved</span>
@@ -61,7 +110,7 @@ export default function SavedPage() {
                     {item.query}
                   </p>
                   <div className="mt-1 flex items-center gap-3 text-xs text-zinc-400">
-                    <span>{item.sources.length} sources</span>
+                    <span>{sourceCount(item.sources)} sources</span>
                     <span>·</span>
                     <span>
                       {new Date(item.savedAt).toLocaleDateString(undefined, {
@@ -72,12 +121,12 @@ export default function SavedPage() {
                     </span>
                   </div>
                   <p className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                    {item.answer.replace(/\[\d+\]/g, "").trim()}
+                    {String(item.answer).replace(/\[\d+\]/g, "").trim()}
                   </p>
                 </Link>
                 <button
                   type="button"
-                  onClick={() => handleDelete(item.id)}
+                  onClick={() => void handleDelete(item.id)}
                   aria-label="Delete saved conversation"
                   className="shrink-0 rounded p-1 text-zinc-300 transition-colors hover:bg-zinc-100 hover:text-zinc-500 dark:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-400"
                 >
