@@ -113,7 +113,7 @@ export function NewSourceStrip({
 }) {
   if (sources.length === 0) return null;
   return (
-    <div className="scroll-thin -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+    <div className="scroll-thin -mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [&::-webkit-scrollbar]:hidden">
       {sources.map((s, i) => (
         <SourcePill
           key={s.id}

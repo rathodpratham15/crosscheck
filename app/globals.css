@@ -82,10 +82,9 @@ html.light .bg-grid {
     linear-gradient(to bottom, rgba(0, 0, 0, 0.045) 1px, transparent 1px);
 }
 
-/* Thin scrollbar */
-.scroll-thin::-webkit-scrollbar { height: 6px; width: 6px; }
-.scroll-thin::-webkit-scrollbar-thumb { background: var(--color-ink-4); border-radius: 999px; }
-.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+/* Hidden scrollbar (scrollable but no visible bar) */
+.scroll-thin { scrollbar-width: none; }
+.scroll-thin::-webkit-scrollbar { display: none; }
 
 /* Citation pill */
 .cite {
