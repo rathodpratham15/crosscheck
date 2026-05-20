@@ -166,6 +166,11 @@ export default function Home() {
   const [history, setHistory] = useState<string[]>([]);
   const historyRef = useRef<string[]>([]);
 
+  // Each past conversation = one new-search session (follow-ups within it are all its turns)
+  type ConversationSummary = { title: string; turns: Turn[] };
+  const [pastConversations, setPastConversations] = useState<ConversationSummary[]>([]);
+  const [viewingConvIndex, setViewingConvIndex] = useState<number | null>(null);
+
   // GPT comparison
   const [gptAnswer, setGptAnswer] = useState("");
   const [gptSources, setGptSources] = useState<Source[]>([]);
@@ -247,6 +252,7 @@ export default function Home() {
     if (trimmed.length < MIN_QUERY_LENGTH || isStreaming) return;
 
     setSubmittedQuery(trimmed);
+    setViewingConvIndex(null);
     setAnswer("");
     setSources([]);
     setSelectedSourceId(null);
@@ -486,13 +492,20 @@ export default function Home() {
 
   function handleNewSearch(q: string) {
     if (q.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
+    // Archive the current conversation before starting fresh
+    if (submittedQuery && (answer || turns.length > 0)) {
+      const title = turns.length > 0 ? turns[0].query : submittedQuery;
+      const allTurns = answer ? [...turns, buildCurrentTurn()] : turns;
+      setPastConversations((prev) => [{ title, turns: allTurns }, ...prev]);
+    }
+    setViewingConvIndex(null);
     setQuery("");
     setTurns([]);
     void runSearch(q, []);
   }
 
   function handleFollowUp(q: string) {
-    if (q.trim().length < MIN_QUERY_LENGTH || isStreaming) return;
+    if (q.trim().length < 1 || isStreaming) return;
     const priorHistory = [
       ...turns.map((t) => ({ query: t.query, answer: t.answer })),
       ...(answer ? [{ query: submittedQuery, answer }] : []),
@@ -555,261 +568,328 @@ export default function Home() {
 
   return (
     <>
-      <main className="flex-1 bg-grid">
-        <div
-          className={`mx-auto max-w-[860px] px-5 md:px-8 ${
-            isEmpty
-              ? "flex min-h-[calc(100svh-56px)] flex-col items-center justify-center py-12"
-              : "py-8"
-          }`}
-        >
-          {/* Hero (empty state) */}
-          {isEmpty && (
-            <>
-              <div className="mb-8 text-center">
-                <h1 className="font-heading text-[28px] font-bold tracking-tight text-[var(--color-fg)] md:text-[36px]">
-                  Ask anything about AI/ML research
-                </h1>
-                <p className="mt-2 font-mono text-[12px] text-[var(--color-text-muted)]">
-                  Every citation verified against its source
-                </p>
-              </div>
-              <div className="w-full max-w-xl">
-                <SearchComposer
-                  value={query}
-                  onChange={setQuery}
-                  onSubmit={handleNewSearch}
-                  busy={isStreaming}
-                />
-              </div>
-              <div className="mt-8 w-full max-w-xl">
-                <EmptyState
-                  examples={EXAMPLE_PROMPTS}
-                  recent={history}
-                  onPick={handleNewSearch}
-                />
-              </div>
-            </>
-          )}
-
-          {/* Active search bar (non-empty state) */}
-          {!isEmpty && (
-            <div className="mb-6">
+      {isEmpty ? (
+        /* ── Empty / hero state ── */
+        <main className="flex-1 bg-grid">
+          <div className="flex min-h-[calc(100svh-56px)] flex-col items-center justify-center px-5 py-12">
+            <div className="mb-8 text-center">
+              <h1 className="font-heading text-[28px] font-bold tracking-tight text-[var(--color-fg)] md:text-[36px]">
+                Ask anything about AI/ML research
+              </h1>
+              <p className="mt-2 font-mono text-[12px] text-[var(--color-text-muted)]">
+                Every citation verified against its source
+              </p>
+            </div>
+            <div className="w-full max-w-xl">
               <SearchComposer
                 value={query}
                 onChange={setQuery}
                 onSubmit={handleNewSearch}
                 busy={isStreaming}
-                compact
               />
             </div>
-          )}
-
-          {/* Error */}
-          {error && (
-            <div
-              role="alert"
-              className="mb-6 fade-up flex items-start gap-3 rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-300"
-            >
-              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-[11px] font-bold text-white">
-                !
-              </span>
-              <div className="flex-1">
-                <p className="font-semibold">Something went wrong</p>
-                <p className="mt-0.5 opacity-80">{error}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setError(null)}
-                className="text-red-400 hover:text-red-200"
-              >
-                ✕
-              </button>
+            <div className="mt-8 w-full max-w-xl">
+              <EmptyState
+                examples={EXAMPLE_PROMPTS}
+                recent={history}
+                onPick={handleNewSearch}
+              />
             </div>
-          )}
+          </div>
+        </main>
+      ) : (
+        /* ── Split layout ── */
+        <main className="flex h-[calc(100svh-56px)] overflow-hidden bg-grid">
 
-          {/* Prior turns — unified Q+A block per turn */}
-          {turns.map((turn, i) => {
-            const hasTurnGpt = !!(turn.gptAnswer || (turn.gptSources?.length ?? 0) > 0);
-            const hasTurnLlama = !!(turn.geminiAnswer || (turn.geminiSources?.length ?? 0) > 0);
-            return (
-              <div
-                key={i}
-                className="fade-up mb-6 overflow-hidden rounded-xl border border-[var(--color-border)] opacity-70"
-                style={{ borderLeftWidth: 2, borderLeftColor: "var(--color-claude)" }}
-              >
-                {/* Question header */}
-                <div className="border-b border-[var(--color-border)] px-5 py-4">
-                  <p className="font-heading text-[15px] font-semibold leading-snug text-[var(--color-fg)]">
-                    {turn.query}
+          {/* LEFT PANE — desktop only */}
+          <aside className="hidden md:flex w-[360px] shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)]">
+            {/* Search bar */}
+            <div className="border-b border-[var(--color-border)] p-4">
+              <SearchComposer
+                compact
+                value={query}
+                onChange={setQuery}
+                onSubmit={handleNewSearch}
+                busy={isStreaming}
+              />
+            </div>
+
+            {/* Conversation list */}
+            <div className="flex-1 overflow-y-auto scroll-thin py-2">
+              {pastConversations.length > 0 && (
+                <p className="mb-1 px-4 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+                  History
+                </p>
+              )}
+
+              {/* Past conversations */}
+              {pastConversations.map((conv, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setViewingConvIndex(viewingConvIndex === i ? null : i)}
+                  className={`mx-2 mb-1 w-[calc(100%-1rem)] rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--color-ink-2)] ${
+                    viewingConvIndex === i ? "bg-[var(--color-ink-2)]" : "opacity-70"
+                  }`}
+                >
+                  <p className="truncate text-[13px] font-medium text-[var(--color-fg)]">
+                    {conv.title}
                   </p>
-                </div>
-                {/* Claude answer */}
-                <ResultCard
-                  nested
-                  model="claude"
-                  answer={turn.answer}
-                  sources={turn.sources}
-                  verifications={turn.verifications}
-                  initialCollapsed
-                  onSelectSource={setSelectedSourceId}
-                  onSave={() => void saveTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
-                  onShare={() => void shareTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
-                  query={turn.query}
-                />
-                {/* GPT answer if it existed */}
-                {hasTurnGpt && (
-                  <div className="border-t border-[var(--color-border)]">
-                    <ResultCard
-                      nested
-                      model="gpt"
-                      answer={turn.gptAnswer ?? ""}
-                      sources={turn.gptSources ?? []}
-                      verifications={turn.gptVerifications ?? {}}
-                      initialCollapsed
-                      onSelectSource={setSelectedSourceId}
-                      onSave={() => void saveTurnData(turn.query, turn.gptAnswer ?? "", turn.gptSources ?? [], turn.gptVerifications ?? {})}
-                      onShare={() => void shareTurnData(turn.query, turn.gptAnswer ?? "", turn.gptSources ?? [], turn.gptVerifications ?? {})}
-                      query={turn.query}
-                    />
-                  </div>
-                )}
-                {/* Llama answer if it existed */}
-                {hasTurnLlama && (
-                  <div className="border-t border-[var(--color-border)]">
-                    <ResultCard
-                      nested
-                      model="gemini"
-                      answer={turn.geminiAnswer ?? ""}
-                      sources={turn.geminiSources ?? []}
-                      verifications={turn.geminiVerifications ?? {}}
-                      initialCollapsed
-                      onSelectSource={setSelectedSourceId}
-                      onSave={() => void saveTurnData(turn.query, turn.geminiAnswer ?? "", turn.geminiSources ?? [], turn.geminiVerifications ?? {})}
-                      onShare={() => void shareTurnData(turn.query, turn.geminiAnswer ?? "", turn.geminiSources ?? [], turn.geminiVerifications ?? {})}
-                      query={turn.query}
-                    />
-                  </div>
-                )}
+                  <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                    {conv.turns.length} {conv.turns.length === 1 ? "turn" : "turns"}
+                  </p>
+                </button>
+              ))}
+
+              {/* Current conversation */}
+              {submittedQuery && (
+                <button
+                  type="button"
+                  onClick={() => setViewingConvIndex(null)}
+                  className={`mx-2 w-[calc(100%-1rem)] rounded-lg px-3 py-2 text-left ring-1 ring-indigo-500/20 transition-colors ${
+                    viewingConvIndex === null ? "bg-indigo-500/10" : "bg-indigo-500/5 opacity-70 hover:bg-indigo-500/10"
+                  }`}
+                >
+                  <p className="truncate text-[13px] font-medium text-[var(--color-fg)]">
+                    {turns.length > 0 ? turns[0].query : submittedQuery}
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-indigo-400">
+                    {isStreaming ? "Researching…" : `${turns.length + 1} ${turns.length === 0 ? "turn" : "turns"}`}
+                  </p>
+                </button>
+              )}
+            </div>
+
+            {/* Follow-up composer */}
+            {hasResult && !isStreaming && viewingConvIndex === null && (
+              <div className="border-t border-[var(--color-border)] p-4">
+                <FollowUpComposer onSubmit={handleFollowUp} />
               </div>
-            );
-          })}
+            )}
+          </aside>
 
-          {/* Active turn — unified Q+A card */}
-          {(isStreaming || hasResult) && (
-            <div className="mb-6">
-              {/* Streaming state shown above the card while sources haven't arrived yet */}
-              {isStreaming && sources.length === 0 && (
-                <div className="mb-3 fade-up">
-                  <StreamingState query={submittedQuery} step={streamingStep} />
-                </div>
-              )}
-
-              {(hasResult || (isStreaming && sources.length > 0)) && (
-                <ResultCard
-                  model="claude"
-                  answer={answer}
-                  sources={sources}
-                  verifications={verifications}
-                  showQuery
-                  isPrimary
-                  isStreaming={isStreaming}
-                  isSaved={!!savedId}
-                  onSave={() => void handleSave()}
-                  onShare={() => void handleShare()}
-                  onSelectSource={setSelectedSourceId}
-                  onRunGpt={
-                    hasCitations && !gptIsStreaming
-                      ? () => void runGptCompare()
-                      : undefined
-                  }
-                  onRunGemini={
-                    hasCitations && !geminiIsStreaming
-                      ? () => void runGeminiCompare()
-                      : undefined
-                  }
-                  gptDone={hasGptResult || gptIsStreaming}
-                  geminiDone={hasGeminiResult || geminiIsStreaming}
-                  cachedResult={cachedResult}
-                  onRerun={() => {
-                    setCachedResult(false);
-                    void runSearch(submittedQuery, []);
-                  }}
-                  query={submittedQuery}
-                />
-              )}
+          {/* RIGHT PANE — results */}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {/* Mobile-only search bar */}
+            <div className="border-b border-[var(--color-border)] p-3 md:hidden">
+              <SearchComposer
+                compact
+                value={query}
+                onChange={setQuery}
+                onSubmit={handleNewSearch}
+                busy={isStreaming}
+              />
             </div>
-          )}
 
-          {/* GPT streaming state — shown while searching (before sources arrive) */}
-          {gptIsStreaming && gptSources.length === 0 && (
-            <div className="mb-6 fade-up">
-              <StreamingState query={submittedQuery} step={gptStep} />
-            </div>
-          )}
+            <div className="flex-1 overflow-y-auto scroll-thin">
+              <div className="mx-auto max-w-[780px] px-4 py-4 md:px-6 md:py-6">
 
-          {/* GPT result */}
-          {(hasGptResult || gptIsStreaming) && (
-            <div className="mb-6">
-              {gptError && (
-                <p className="mb-2 text-xs text-red-400">{gptError}</p>
-              )}
-              {(gptAnswer || gptSources.length > 0) && (
-                <ResultCard
-                  model="gpt"
-                  answer={gptAnswer}
-                  sources={gptSources}
-                  verifications={gptVerifications}
-                  isStreaming={gptIsStreaming}
-                  onSelectSource={() => {}}
-                  query={submittedQuery}
-                />
-              )}
-            </div>
-          )}
+                {/* Error */}
+                {error && (
+                  <div
+                    role="alert"
+                    className="mb-6 fade-up flex items-start gap-3 rounded-xl border border-red-900/40 bg-red-950/30 px-4 py-3 text-sm text-red-300"
+                  >
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-[11px] font-bold text-white">
+                      !
+                    </span>
+                    <div className="flex-1">
+                      <p className="font-semibold">Something went wrong</p>
+                      <p className="mt-0.5 opacity-80">{error}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setError(null)}
+                      className="text-red-400 hover:text-red-200"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
 
-          {/* Gemini streaming state — shown while searching (before sources arrive) */}
-          {geminiIsStreaming && geminiSources.length === 0 && (
-            <div className="mb-6 fade-up">
-              <StreamingState query={submittedQuery} step={geminiStep} />
-            </div>
-          )}
+                {/* Viewing a past conversation */}
+                {viewingConvIndex !== null && pastConversations[viewingConvIndex] && (
+                  <>
+                    {pastConversations[viewingConvIndex]!.turns.map((turn, i) => (
+                      <div key={i} className={`mb-6 ${i < pastConversations[viewingConvIndex]!.turns.length - 1 ? "opacity-80" : ""}`}>
+                        <ResultCard
+                          model="claude"
+                          answer={turn.answer}
+                          sources={turn.sources}
+                          verifications={turn.verifications}
+                          showQuery
+                          initialCollapsed={i < pastConversations[viewingConvIndex]!.turns.length - 1}
+                          onSelectSource={setSelectedSourceId}
+                          onSave={() => void saveTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
+                          onShare={() => void shareTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
+                          query={turn.query}
+                        />
+                        {turn.gptAnswer && (
+                          <div className="mt-3">
+                            <ResultCard model="gpt" answer={turn.gptAnswer} sources={turn.gptSources ?? []} verifications={turn.gptVerifications ?? {}} initialCollapsed onSelectSource={setSelectedSourceId} query={turn.query} />
+                          </div>
+                        )}
+                        {turn.geminiAnswer && (
+                          <div className="mt-3">
+                            <ResultCard model="gemini" answer={turn.geminiAnswer} sources={turn.geminiSources ?? []} verifications={turn.geminiVerifications ?? {}} initialCollapsed onSelectSource={setSelectedSourceId} query={turn.query} />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                )}
 
-          {/* Gemini result */}
-          {(hasGeminiResult || geminiIsStreaming) && (
-            <div className="mb-6">
-              {geminiError && (
-                <p className="mb-2 text-xs text-red-400">{geminiError}</p>
-              )}
-              {(geminiAnswer || geminiSources.length > 0) && (
-                <ResultCard
-                  model="gemini"
-                  answer={geminiAnswer}
-                  sources={geminiSources}
-                  verifications={geminiVerifications}
-                  isStreaming={geminiIsStreaming}
-                  onSelectSource={() => {}}
-                  query={submittedQuery}
-                />
-              )}
-            </div>
-          )}
+                {/* Current conversation — all turns stacked + active result */}
+                {viewingConvIndex === null && (
+                  <>
+                    {/* Prior turns within this conversation */}
+                    {turns.map((turn, i) => (
+                      <div key={i} className="mb-6 opacity-75">
+                        <ResultCard
+                          model="claude"
+                          answer={turn.answer}
+                          sources={turn.sources}
+                          verifications={turn.verifications}
+                          showQuery
+                          initialCollapsed
+                          onSelectSource={setSelectedSourceId}
+                          onSave={() => void saveTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
+                          onShare={() => void shareTurnData(turn.query, turn.answer, turn.sources, turn.verifications)}
+                          query={turn.query}
+                        />
+                        {turn.gptAnswer && (
+                          <div className="mt-3">
+                            <ResultCard model="gpt" answer={turn.gptAnswer} sources={turn.gptSources ?? []} verifications={turn.gptVerifications ?? {}} initialCollapsed onSelectSource={setSelectedSourceId} query={turn.query} />
+                          </div>
+                        )}
+                        {turn.geminiAnswer && (
+                          <div className="mt-3">
+                            <ResultCard model="gemini" answer={turn.geminiAnswer} sources={turn.geminiSources ?? []} verifications={turn.geminiVerifications ?? {}} initialCollapsed onSelectSource={setSelectedSourceId} query={turn.query} />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                )}
 
-          {/* Explore further */}
-          {suggestions.length > 0 && !isStreaming && (
-            <div className="mb-6 fade-up">
-              <ExploreFurther items={suggestions} onPick={handleExplorePick} />
-            </div>
-          )}
+                {/* Current conversation — prior turns stacked + active result */}
+                {viewingConvIndex === null && (
+                  <>
+                    {/* Claude — streaming state */}
+                    {isStreaming && sources.length === 0 && (
+                      <div className="mb-4 fade-up">
+                        <StreamingState query={submittedQuery} step={streamingStep} />
+                      </div>
+                    )}
 
-          {/* Follow-up */}
-          {hasResult && !isStreaming && (
-            <div className="mb-6">
-              <FollowUpComposer onSubmit={handleFollowUp} />
+                    {/* Claude result */}
+                    {(hasResult || (isStreaming && sources.length > 0)) && (
+                      <div className="mb-6">
+                        <ResultCard
+                          model="claude"
+                          answer={answer}
+                          sources={sources}
+                          verifications={verifications}
+                          showQuery
+                          isPrimary
+                          isStreaming={isStreaming}
+                          isSaved={!!savedId}
+                          onSave={() => void handleSave()}
+                          onShare={() => void handleShare()}
+                          onSelectSource={setSelectedSourceId}
+                          onRunGpt={
+                            hasCitations && !gptIsStreaming
+                              ? () => void runGptCompare()
+                              : undefined
+                          }
+                          onRunGemini={
+                            hasCitations && !geminiIsStreaming
+                              ? () => void runGeminiCompare()
+                              : undefined
+                          }
+                          gptDone={hasGptResult || gptIsStreaming}
+                          geminiDone={hasGeminiResult || geminiIsStreaming}
+                          cachedResult={cachedResult}
+                          onRerun={() => {
+                            setCachedResult(false);
+                            void runSearch(submittedQuery, []);
+                          }}
+                          query={submittedQuery}
+                        />
+                      </div>
+                    )}
+
+                    {/* GPT — streaming state */}
+                    {gptIsStreaming && gptSources.length === 0 && (
+                      <div className="mb-4 fade-up">
+                        <StreamingState query={submittedQuery} step={gptStep} />
+                      </div>
+                    )}
+
+                    {/* GPT result */}
+                    {(hasGptResult || gptIsStreaming) && (
+                      <div className="mb-6">
+                        {gptError && <p className="mb-2 text-xs text-red-400">{gptError}</p>}
+                        {(gptAnswer || gptSources.length > 0) && (
+                          <ResultCard
+                            model="gpt"
+                            answer={gptAnswer}
+                            sources={gptSources}
+                            verifications={gptVerifications}
+                            isStreaming={gptIsStreaming}
+                            onSelectSource={() => {}}
+                            query={submittedQuery}
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    {/* Llama — streaming state */}
+                    {geminiIsStreaming && geminiSources.length === 0 && (
+                      <div className="mb-4 fade-up">
+                        <StreamingState query={submittedQuery} step={geminiStep} />
+                      </div>
+                    )}
+
+                    {/* Llama result */}
+                    {(hasGeminiResult || geminiIsStreaming) && (
+                      <div className="mb-6">
+                        {geminiError && <p className="mb-2 text-xs text-red-400">{geminiError}</p>}
+                        {(geminiAnswer || geminiSources.length > 0) && (
+                          <ResultCard
+                            model="gemini"
+                            answer={geminiAnswer}
+                            sources={geminiSources}
+                            verifications={geminiVerifications}
+                            isStreaming={geminiIsStreaming}
+                            onSelectSource={() => {}}
+                            query={submittedQuery}
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    {/* Explore further */}
+                    {suggestions.length > 0 && !isStreaming && (
+                      <div className="mb-6 fade-up">
+                        <ExploreFurther items={suggestions} onPick={handleExplorePick} />
+                      </div>
+                    )}
+                  </>
+                )}
+
+              </div>
             </div>
-          )}
-        </div>
-      </main>
+
+            {/* Mobile-only follow-up at bottom */}
+            {hasResult && !isStreaming && viewingConvIndex === null && (
+              <div className="border-t border-[var(--color-border)] p-3 md:hidden">
+                <FollowUpComposer onSubmit={handleFollowUp} />
+              </div>
+            )}
+          </div>
+        </main>
+      )}
 
       {/* Source detail overlay */}
       <SourceDetail
