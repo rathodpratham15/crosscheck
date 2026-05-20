@@ -23,6 +23,37 @@ import type { Source } from "@/lib/tavily";
 const MIN_QUERY_LENGTH = 5;
 const MAX_HISTORY = 8;
 const HISTORY_KEY = "crosscheck-history";
+const CACHE_TTL = 24 * 60 * 60 * 1000;
+
+type SessionCache = {
+  query: string;
+  answer: string;
+  sources: Source[];
+  verifications: Record<number, VerificationDisplay>;
+  turns: Turn[];
+  cachedAt: number;
+};
+
+function loadCache(q: string): SessionCache | null {
+  try {
+    const raw = localStorage.getItem(`crosscheck-cache-${q}`);
+    if (!raw) return null;
+    const c = JSON.parse(raw) as SessionCache;
+    if (Date.now() - c.cachedAt > CACHE_TTL) return null;
+    return c;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(q: string, data: Omit<SessionCache, "cachedAt">) {
+  try {
+    localStorage.setItem(
+      `crosscheck-cache-${q}`,
+      JSON.stringify({ ...data, cachedAt: Date.now() }),
+    );
+  } catch {}
+}
 
 function getDomain(url: string): string {
   if (url.includes("arxiv.org")) return "arXiv";
@@ -156,6 +187,7 @@ export default function Home() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+  const [cachedResult, setCachedResult] = useState(false);
 
   // Search history
   const [history, setHistory] = useState<string[]>([]);
@@ -170,11 +202,21 @@ export default function Home() {
         setHistory(parsed);
       }
     } catch {}
-    // Auto-run search if ?q= is in the URL
+    // Auto-run search if ?q= is in the URL, restore from cache if available
     const q = new URLSearchParams(window.location.search).get("q");
     if (q && q.trim().length >= MIN_QUERY_LENGTH) {
       setQuery(q);
-      void runSearch(q, []);
+      const cached = loadCache(q);
+      if (cached) {
+        setSubmittedQuery(q);
+        setAnswer(cached.answer);
+        setSources(cached.sources);
+        setVerifications(cached.verifications);
+        setTurns(cached.turns);
+        setCachedResult(true);
+      } else {
+        void runSearch(q, []);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -260,6 +302,7 @@ export default function Home() {
     setSuggestions([]);
     setActiveFilters(new Set());
     setSavedId(null);
+    setCachedResult(false);
 
     // Update URL for shareability
     window.history.replaceState(
@@ -269,11 +312,13 @@ export default function Home() {
     );
 
     let accumulatedAnswer = "";
+    let localSources: Source[] = [];
+    let localVerifications: Record<number, VerificationDisplay> = {};
     try {
       await streamResearch(
         { query: trimmed, history: historyArg },
         {
-          onSources: setSources,
+          onSources: (s) => { localSources = s; setSources(s); },
           onDelta: (text) => {
             accumulatedAnswer += text;
             setAnswer((prev) => prev + text);
@@ -282,18 +327,29 @@ export default function Home() {
             setVerifications((prev) => {
               const next = { ...prev };
               for (const id of ids) next[id] = { status: "checking" };
+              localVerifications = next;
               return next;
             }),
           onVerification: (id, status, reason, quote) =>
-            setVerifications((prev) => ({
-              ...prev,
-              [id]: { status, reason, quote },
-            })),
+            setVerifications((prev) => {
+              const next = { ...prev, [id]: { status, reason, quote } };
+              localVerifications = next;
+              return next;
+            }),
           onError: setError,
         },
       );
       saveToHistory(trimmed);
-      if (accumulatedAnswer) void fetchSuggestions(trimmed, accumulatedAnswer);
+      if (accumulatedAnswer) {
+        void fetchSuggestions(trimmed, accumulatedAnswer);
+        saveCache(trimmed, {
+          query: trimmed,
+          answer: accumulatedAnswer,
+          sources: localSources,
+          verifications: localVerifications,
+          turns: [],
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -422,11 +478,28 @@ export default function Home() {
     });
   }
 
-  function handleCopyLink() {
-    void navigator.clipboard.writeText(window.location.href).then(() => {
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2000);
-    });
+  async function handleCopyLink() {
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: submittedQuery, answer, sources, verifications }),
+      });
+      if (res.ok) {
+        const { id } = (await res.json()) as { id: string };
+        await navigator.clipboard.writeText(`${window.location.origin}/share/${id}`);
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2000);
+        return;
+      }
+    } catch {}
+    await navigator.clipboard.writeText(window.location.href);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  }
+
+  async function runCompareAll() {
+    await Promise.all([runGptCompare(), runGeminiCompare()]);
   }
 
   function handleNewSearch() {
@@ -732,27 +805,44 @@ export default function Home() {
                 <div className="flex flex-wrap items-center gap-3">
                   {hasCitations && (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => void runGptCompare()}
-                        disabled={gptIsStreaming}
-                        className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
-                      >
-                        {hasGptResult || gptIsStreaming
-                          ? "↺ GPT-4o mini"
-                          : "GPT-4o mini →"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void runGeminiCompare()}
-                        disabled={geminiIsStreaming}
-                        className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
-                      >
-                        {hasGeminiResult || geminiIsStreaming
-                          ? "↺ Gemini"
-                          : "Gemini →"}
-                      </button>
+                      {!hasGptResult && !hasGeminiResult && !gptIsStreaming && !geminiIsStreaming ? (
+                        <button
+                          type="button"
+                          onClick={() => void runCompareAll()}
+                          className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+                        >
+                          Compare all →
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void runGptCompare()}
+                            disabled={gptIsStreaming}
+                            className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
+                          >
+                            {gptIsStreaming ? "↺ GPT-4o mini" : hasGptResult ? "↺ GPT-4o mini" : "GPT-4o mini →"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void runGeminiCompare()}
+                            disabled={geminiIsStreaming}
+                            className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 disabled:opacity-40 dark:hover:text-zinc-200"
+                          >
+                            {geminiIsStreaming ? "↺ Gemini" : hasGeminiResult ? "↺ Gemini" : "Gemini →"}
+                          </button>
+                        </>
+                      )}
                     </>
+                  )}
+                  {cachedResult && (
+                    <button
+                      type="button"
+                      onClick={() => { setCachedResult(false); void runSearch(submittedQuery, []); }}
+                      className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+                    >
+                      ↺ Re-run
+                    </button>
                   )}
                 </div>
                 <div className="flex items-center gap-3">
@@ -770,7 +860,7 @@ export default function Home() {
                   </button>
                   <button
                     type="button"
-                    onClick={handleCopyLink}
+                    onClick={() => void handleCopyLink()}
                     className="text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
                   >
                     {copiedLink ? "Copied!" : "Share ↗"}

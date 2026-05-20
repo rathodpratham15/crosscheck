@@ -4,6 +4,17 @@ import { useRef } from "react";
 import type { Source } from "@/lib/tavily";
 import type { CitationStatus } from "./citation-chip";
 
+function extractYear(url: string): number | null {
+  const m = url.match(/arxiv\.org\/abs\/(\d{2})\d{2}\./);
+  if (m) {
+    const y = parseInt(m[1]);
+    return (y <= 30 ? 2000 : 1900) + y;
+  }
+  return null;
+}
+
+const CURRENT_YEAR = new Date().getFullYear();
+
 type SourceStripProps = {
   sources: Source[];
   selectedId: number | null;
@@ -53,6 +64,8 @@ export function SourceStrip({
       {sources.map((s, idx) => {
         const isSelected = s.id === selectedId;
         const status = getStatus?.(s.id);
+        const year = extractYear(s.url);
+        const isStale = year !== null && CURRENT_YEAR - year > 3;
         return (
           <button
             key={s.id}
@@ -88,6 +101,21 @@ export function SourceStrip({
             >
               {Math.round(s.score * 100)}%
             </span>
+            {year !== null && (
+              <span
+                title={isStale ? `Published ${year} — may be outdated` : `Published ${year}`}
+                className={
+                  "shrink-0 rounded px-1 text-[9px] font-medium tabular-nums " +
+                  (isStale
+                    ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                    : isSelected
+                      ? "bg-white/20 text-white dark:bg-zinc-900/20 dark:text-zinc-900"
+                      : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400")
+                }
+              >
+                {year}
+              </span>
+            )}
             {status && (
               <span
                 aria-label={`verification ${status}`}
