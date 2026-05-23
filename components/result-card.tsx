@@ -9,6 +9,7 @@ import {
   FileText,
   ChevronDown,
   RotateCcw,
+  Plus,
 } from "lucide-react";
 import type { Source } from "@/lib/tavily";
 import type { VerificationDisplay } from "./source-side-panel";
@@ -17,16 +18,18 @@ import { MarkdownAnswer } from "./markdown-answer";
 import { NewSourceStrip } from "./source-pill";
 import { DomainFilters, type DomainFilter } from "./domain-filters";
 
-const MODEL_ACCENT: Record<"claude" | "gpt" | "gemini", string> = {
+const MODEL_ACCENT: Record<"claude" | "gpt" | "gemini" | "google", string> = {
   claude: "var(--color-claude)",
   gpt: "var(--color-gpt)",
   gemini: "var(--color-gemini)",
+  google: "var(--color-google)",
 };
 
-const MODEL_LABEL: Record<"claude" | "gpt" | "gemini", string> = {
+const MODEL_LABEL: Record<"claude" | "gpt" | "gemini" | "google", string> = {
   claude: "Claude Sonnet",
   gpt: "GPT-4o mini",
   gemini: "Llama 3.3 · Groq",
+  google: "Gemini 1.5 Pro",
 };
 
 function getDomainKey(url: string): DomainFilter {
@@ -60,7 +63,7 @@ function downloadAs(ext: string, name: string, body: string) {
 }
 
 type ResultCardProps = {
-  model: "claude" | "gpt" | "gemini";
+  model: "claude" | "gpt" | "gemini" | "google";
   answer: string;
   sources: Source[];
   verifications: Record<number, VerificationDisplay>;
@@ -75,10 +78,13 @@ type ResultCardProps = {
   onSelectSource: (id: number) => void;
   onRunGpt?: () => void;
   onRunGemini?: () => void;
+  onRunGoogle?: () => void;
   gptDone?: boolean;
   geminiDone?: boolean;
+  googleDone?: boolean;
   cachedResult?: boolean;
   onRerun?: () => void;
+  onCompare?: () => void;
   query: string;
 };
 
@@ -98,10 +104,13 @@ export function ResultCard({
   onSelectSource,
   onRunGpt,
   onRunGemini,
+  onRunGoogle,
   gptDone,
   geminiDone,
+  googleDone,
   cachedResult,
   onRerun,
+  onCompare,
   query,
 }: ResultCardProps) {
   const [filter, setFilter] = useState<DomainFilter>("all");
@@ -248,19 +257,15 @@ export function ResultCard({
             <div className="flex flex-wrap items-center gap-1 border-t border-[var(--color-border)] px-3 py-2">
               {isPrimary && (
                 <div className="flex items-center gap-1">
-                  {!gptDone && onRunGpt && (
-                    <ModelTrigger
-                      label="Compare GPT-4o mini →"
-                      color="var(--color-gpt)"
-                      onClick={onRunGpt}
-                    />
-                  )}
-                  {!geminiDone && onRunGemini && (
-                    <ModelTrigger
-                      label="Compare Llama 3.3 →"
-                      color="var(--color-gemini)"
-                      onClick={onRunGemini}
-                    />
+                  {onCompare && (
+                    <button
+                      type="button"
+                      onClick={onCompare}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-1 text-[12px] text-indigo-500 transition-colors hover:bg-indigo-500/20 dark:text-indigo-400"
+                    >
+                      <Plus className="h-3 w-3" strokeWidth={2.5} />
+                      Compare
+                    </button>
                   )}
                   {cachedResult && onRerun && (
                     <ActionBtn
