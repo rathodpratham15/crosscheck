@@ -942,7 +942,7 @@ export default function Home() {
                           turn={turn}
                           collapsed={!isLast}
                           dimmed={!isLast}
-                          onSelectSource={(id) => selectSource(id, "claude")}
+                          onDetail={(src, verif) => { setDetailSource(src); setDetailVerif(verif); }}
                           onSave={saveTurnData}
                           onShare={shareTurnData}
                         />
@@ -958,7 +958,7 @@ export default function Home() {
                     turn={turn}
                     collapsed
                     dimmed
-                    onSelectSource={(id) => selectSource(id, "claude")}
+                    onDetail={(src, verif) => { setDetailSource(src); setDetailVerif(verif); }}
                     onSave={saveTurnData}
                     onShare={shareTurnData}
                   />
@@ -1002,7 +1002,7 @@ export default function Home() {
                                 isSaved={!!savedId}
                                 onSave={() => void handleSave()}
                                 onShare={() => void handleShare()}
-                                onSelectSource={(id) => selectSource(id, "gemini")}
+                                onSelectSource={(id) => selectSource(id, "claude")}
                                 onCompare={() => setShowAddModel(true)}
                                 cachedResult={cachedResult}
                                 onRerun={() => {
@@ -1144,7 +1144,7 @@ export default function Home() {
                               isSaved={!!savedId}
                               onSave={() => void handleSave()}
                               onShare={() => void handleShare()}
-                              onSelectSource={(id) => selectSource(id, "gemini")}
+                              onSelectSource={(id) => selectSource(id, "claude")}
                               onCompare={() => setShowAddModel(true)}
                               cachedResult={cachedResult}
                               onRerun={() => {
@@ -1401,7 +1401,7 @@ function TurnBlock({
   turn,
   collapsed,
   dimmed,
-  onSelectSource,
+  onDetail,
   onSave,
   onShare,
 }: {
@@ -1422,14 +1422,19 @@ function TurnBlock({
   };
   collapsed?: boolean;
   dimmed?: boolean;
-  onSelectSource: (id: number) => void;
+  onDetail: (src: Source | null, verif?: VerificationDisplay) => void;
   onSave: (q: string, a: string, s: Source[], v: Record<number, VerificationDisplay>) => Promise<string | null>;
   onShare: (q: string, a: string, s: Source[], v: Record<number, VerificationDisplay>) => Promise<void>;
 }) {
+  function pick(id: number, srcs: Source[], verifs: Record<number, VerificationDisplay>) {
+    const src = srcs.find((s) => s.id === id) ?? null;
+    onDetail(src, src ? verifs[src.id] : undefined);
+  }
+
   return (
     <div
       className={`mb-6 overflow-hidden rounded-xl border border-[var(--color-border)] transition-opacity ${dimmed ? "opacity-70" : ""}`}
-      style={{ borderLeftWidth: 2, borderLeftColor: "var(--color-claude)" }}
+      style={{ borderLeftWidth: 2, borderLeftColor: "var(--color-gemini)" }}
     >
       <div className="border-b border-[var(--color-border)] px-5 py-4">
         <p className="font-heading text-[15px] font-semibold leading-snug text-[var(--color-fg)]">
@@ -1438,12 +1443,12 @@ function TurnBlock({
       </div>
       <ResultCard
         nested
-        model="claude"
+        model="gemini"
         answer={turn.answer}
         sources={turn.sources}
         verifications={turn.verifications}
         initialCollapsed={collapsed}
-        onSelectSource={onSelectSource}
+        onSelectSource={(id) => pick(id, turn.sources, turn.verifications)}
         onSave={() => void onSave(turn.query, turn.answer, turn.sources, turn.verifications)}
         onShare={() => void onShare(turn.query, turn.answer, turn.sources, turn.verifications)}
         query={turn.query}
@@ -1457,7 +1462,7 @@ function TurnBlock({
             sources={turn.gptSources ?? []}
             verifications={turn.gptVerifications ?? {}}
             initialCollapsed={collapsed}
-            onSelectSource={onSelectSource}
+            onSelectSource={(id) => pick(id, turn.gptSources ?? [], turn.gptVerifications ?? {})}
             query={turn.query}
           />
         </div>
@@ -1471,7 +1476,7 @@ function TurnBlock({
             sources={turn.geminiSources ?? []}
             verifications={turn.geminiVerifications ?? {}}
             initialCollapsed={collapsed}
-            onSelectSource={onSelectSource}
+            onSelectSource={(id) => pick(id, turn.geminiSources ?? [], turn.geminiVerifications ?? {})}
             query={turn.query}
           />
         </div>
@@ -1485,7 +1490,7 @@ function TurnBlock({
             sources={turn.googleSources ?? []}
             verifications={turn.googleVerifications ?? {}}
             initialCollapsed={collapsed}
-            onSelectSource={onSelectSource}
+            onSelectSource={(id) => pick(id, turn.googleSources ?? [], turn.googleVerifications ?? {})}
             query={turn.query}
           />
         </div>
