@@ -70,7 +70,7 @@ export default function SignInPage() {
 
             {/* Feature pills */}
             <div className="mt-6 flex flex-wrap justify-center gap-2">
-              {["Verified citations", "Multi-model", "Free with Llama"].map((f) => (
+              {["Verified citations", "Multi-model", "Free with gpt-oss"].map((f) => (
                 <span
                   key={f}
                   className="rounded-full border border-indigo-200 bg-white px-3 py-1 font-mono text-[10.5px] text-indigo-600 dark:border-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"

@@ -12,7 +12,7 @@ const groq = createOpenAI({
 export const RESEARCH_MODEL = anthropic("claude-sonnet-4-6");
 export const VERIFIER_MODEL = anthropic("claude-haiku-4-5-20251001");
 export const GPT_RESEARCH_MODEL = openai("gpt-4o-mini");
-export const GEMINI_RESEARCH_MODEL = groq("llama-3.3-70b-versatile");
+export const GEMINI_RESEARCH_MODEL = groq("openai/gpt-oss-120b");
 export const GOOGLE_RESEARCH_MODEL = google("gemini-1.5-pro-latest");
 
 export const SuggestionsSchema = z.object({

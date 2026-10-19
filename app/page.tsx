@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { SearchComposer } from "@/components/search-composer";
@@ -105,11 +106,13 @@ async function streamResearch(
     ) => void;
     onError: (msg: string) => void;
   },
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch("/api/research", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!res.ok || !res.body) {
@@ -154,7 +157,22 @@ async function streamResearch(
 }
 
 export default function Home() {
+  return (
+    <Suspense>
+      <HomeInner />
+    </Suspense>
+  );
+}
+
+function HomeInner() {
   const { data: session } = useSession();
+  const urlQuery = useSearchParams().get("q") ?? "";
+  // The query the on-screen state corresponds to; lets the URL-sync effect
+  // tell our own history updates apart from back/forward and logo navigation.
+  const activeQueryRef = useRef("");
+  const genRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const [llamaActive, setLlamaActive] = useState(true);
 
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -238,6 +256,7 @@ export default function Home() {
       setQuery(q);
       const cached = loadCache(q);
       if (cached) {
+        activeQueryRef.current = q;
         setSubmittedQuery(q);
         setAnswer(cached.answer);
         setSources(cached.sources);
@@ -250,6 +269,72 @@ export default function Home() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Back/forward and the logo link change the URL without remounting this page
+  useEffect(() => {
+    if (urlQuery === activeQueryRef.current) return;
+    if (urlQuery.trim().length < MIN_QUERY_LENGTH) {
+      resetToHome();
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing with the URL, an external system
+    setQuery(urlQuery);
+    const cached = loadCache(urlQuery);
+    if (cached) {
+      resetToHome(false);
+      activeQueryRef.current = urlQuery;
+      setSubmittedQuery(urlQuery);
+      setAnswer(cached.answer);
+      setSources(cached.sources);
+      setVerifications(cached.verifications);
+      setTurns(cached.turns);
+      setCachedResult(true);
+    } else {
+      resetToHome(false);
+      void runSearch(urlQuery, [], [], { nav: "none" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlQuery]);
+
+  function resetToHome(archive = true) {
+    if (archive && submittedQuery && (answer || turns.length > 0)) {
+      const title = turns.length > 0 ? turns[0].query : submittedQuery;
+      const allTurns = answer ? [...turns, buildCurrentTurn()] : turns;
+      setPastConversations((prev) => [{ title, turns: allTurns }, ...prev]);
+    }
+    genRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    activeQueryRef.current = "";
+    setLlamaActive(true);
+    setQuery("");
+    setSubmittedQuery("");
+    setTurns([]);
+    setViewingConvIndex(null);
+    setAnswer("");
+    setSources([]);
+    setDetailSource(null);
+    setDetailVerif(undefined);
+    setVerifications({});
+    setError(null);
+    setIsStreaming(false);
+    setGptAnswer("");
+    setGptSources([]);
+    setGptVerifications({});
+    setGptError(null);
+    setGeminiAnswer("");
+    setGeminiSources([]);
+    setGeminiVerifications({});
+    setGeminiError(null);
+    setGoogleAnswer("");
+    setGoogleSources([]);
+    setGoogleVerifications({});
+    setGoogleError(null);
+    setCustomSlots({});
+    setSuggestions([]);
+    setSavedId(null);
+    setCachedResult(false);
+  }
 
   function saveToHistory(q: string) {
     const next = [q, ...historyRef.current.filter((h) => h !== q)].slice(
@@ -281,10 +366,15 @@ export default function Home() {
     q: string,
     historyArg: { query: string; answer: string }[],
     priorTurns: Turn[] = [],
+    opts: { nav?: "push" | "replace" | "none"; llama?: boolean } = {},
   ) {
+    const { nav = "replace", llama = true } = opts;
     const trimmed = q.trim();
     if (trimmed.length < MIN_QUERY_LENGTH || isStreaming) return;
 
+    const gen = genRef.current;
+    activeQueryRef.current = trimmed;
+    setLlamaActive(llama);
     setSubmittedQuery(trimmed);
     setViewingConvIndex(null);
     setAnswer("");
@@ -293,7 +383,7 @@ export default function Home() {
     setDetailVerif(undefined);
     setVerifications({});
     setError(null);
-    setIsStreaming(true);
+    setIsStreaming(llama);
     setGptAnswer("");
     setGptSources([]);
     setGptVerifications({});
@@ -311,7 +401,17 @@ export default function Home() {
     setSavedId(null);
     setCachedResult(false);
 
-    window.history.replaceState({}, "", `?q=${encodeURIComponent(trimmed)}`);
+    const url = `?q=${encodeURIComponent(trimmed)}`;
+    if (nav === "push") window.history.pushState({}, "", url);
+    else if (nav === "replace") window.history.replaceState({}, "", url);
+
+    if (!llama) {
+      saveToHistory(trimmed);
+      return;
+    }
+
+    abortRef.current ??= new AbortController();
+    const signal = abortRef.current.signal;
 
     let accumulatedAnswer = "";
     let localSources: Source[] = [];
@@ -344,6 +444,7 @@ export default function Home() {
             }),
           onError: setError,
         },
+        signal,
       );
       saveToHistory(trimmed);
       if (accumulatedAnswer) {
@@ -357,9 +458,11 @@ export default function Home() {
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (gen === genRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      setIsStreaming(false);
+      if (gen === genRef.current) setIsStreaming(false);
     }
   }
 
@@ -478,11 +581,15 @@ export default function Home() {
     };
     setCustomSlots((prev) => ({ ...prev, [model.id]: slot }));
 
+    abortRef.current ??= new AbortController();
+    const signal = abortRef.current.signal;
+
     const update = (patch: Partial<CustomSlot>) =>
-      setCustomSlots((prev) => ({
-        ...prev,
-        [model.id]: { ...prev[model.id]!, ...patch },
-      }));
+      setCustomSlots((prev) =>
+        prev[model.id]
+          ? { ...prev, [model.id]: { ...prev[model.id]!, ...patch } }
+          : prev,
+      );
 
     try {
       await streamResearch(
@@ -524,6 +631,7 @@ export default function Home() {
             }),
           onError: (msg) => update({ error: msg }),
         },
+        signal,
       );
     } catch (err) {
       update({ error: err instanceof Error ? err.message : String(err) });
@@ -639,7 +747,11 @@ export default function Home() {
     setPendingQuery(q.trim());
   }
 
-  function confirmSearch(q: string, compareModelIds: string[]) {
+  function confirmSearch(
+    q: string,
+    compareModelIds: string[],
+    includeLlama: boolean,
+  ) {
     setPendingQuery(null);
     // Archive current conversation
     if (submittedQuery && (answer || turns.length > 0)) {
@@ -650,7 +762,8 @@ export default function Home() {
     setViewingConvIndex(null);
     setQuery("");
     setTurns([]);
-    void runSearch(q, []);
+    abortRef.current = null;
+    void runSearch(q, [], [], { nav: "push", llama: includeLlama });
     const modelsToCompare = savedCustomModels.filter((m) =>
       compareModelIds.includes(m.id),
     );
@@ -690,7 +803,11 @@ export default function Home() {
   const hasGeminiResult = geminiAnswer.length > 0 || geminiSources.length > 0;
   const hasGoogleResult = googleAnswer.length > 0 || googleSources.length > 0;
   const isEmpty =
-    !hasResult && !isStreaming && turns.length === 0 && !error;
+    !hasResult &&
+    !isStreaming &&
+    turns.length === 0 &&
+    !error &&
+    Object.keys(customSlots).length === 0;
 
   function selectSource(id: number, model: "claude" | "gpt" | "gemini" | "google") {
     const srcList =
@@ -750,7 +867,7 @@ export default function Home() {
   const hasAnyCustom = customSlotList.some((s) => s.answer.length > 0 || s.sources.length > 0 || s.isStreaming);
   const inComparisonMode = hasGptResult || gptIsStreaming || hasGeminiResult || geminiIsStreaming || hasGoogleResult || googleIsStreaming || hasAnyCustom;
   const activeModelCount =
-    1 +
+    (llamaActive ? 1 : 0) +
     (hasGptResult || gptIsStreaming ? 1 : 0) +
     (hasGeminiResult || geminiIsStreaming ? 1 : 0) +
     (hasGoogleResult || googleIsStreaming ? 1 : 0) +
@@ -906,7 +1023,7 @@ export default function Home() {
             </div>
 
             <div className="flex-1 overflow-y-auto scroll-thin">
-              <div className={`mx-auto px-4 py-4 md:px-6 md:py-6 ${inComparisonMode ? "max-w-full" : "max-w-[780px]"}`}>
+              <div className={`mx-auto px-4 py-4 md:px-6 md:py-6 ${inComparisonMode && activeModelCount > 1 ? "max-w-full" : "max-w-[780px]"}`}>
 
                 {/* Error */}
                 {error && (
@@ -981,7 +1098,9 @@ export default function Home() {
                           className={`grid gap-4 items-start ${
                             activeModelCount >= 3
                               ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
-                              : "grid-cols-1 md:grid-cols-2"
+                              : activeModelCount === 2
+                                ? "grid-cols-1 md:grid-cols-2"
+                                : "grid-cols-1"
                           }`}
                         >
                           {/* Claude */}
@@ -991,7 +1110,7 @@ export default function Home() {
                                 <StreamingState query={submittedQuery} step={streamingStep} />
                               </div>
                             )}
-                            {(hasResult || (isStreaming && sources.length > 0)) && (
+                            {llamaActive && (hasResult || (isStreaming && sources.length > 0)) && (
                               <ResultCard
                                 model="gemini"
                                 answer={answer}
@@ -1185,7 +1304,9 @@ export default function Home() {
         <BeforeSearchModal
           query={pendingQuery}
           savedModels={savedCustomModels}
-          onConfirm={(selectedIds) => confirmSearch(pendingQuery, selectedIds)}
+          onConfirm={(selectedIds, includeLlama) =>
+            confirmSearch(pendingQuery, selectedIds, includeLlama)
+          }
           onAddModel={() => setShowAddModel(true)}
           onClose={() => setPendingQuery(null)}
         />
@@ -1221,11 +1342,13 @@ function BeforeSearchModal({
 }: {
   query: string;
   savedModels: CustomModel[];
-  onConfirm: (selectedIds: string[]) => void;
+  onConfirm: (selectedIds: string[], includeLlama: boolean) => void;
   onAddModel: () => void;
   onClose: () => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [includeLlama, setIncludeLlama] = useState(true);
+  const canSearch = includeLlama || selectedIds.length > 0;
 
   function toggle(id: string) {
     setSelectedIds((prev) =>
@@ -1255,30 +1378,30 @@ function BeforeSearchModal({
           </button>
         </div>
 
-        {/* Primary model */}
-        <div className="border-b border-[var(--color-border)] px-5 py-4">
-          <p className="mb-2 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            Primary model
+        {/* Models */}
+        <div className="px-5 py-4">
+          <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
+            Search with
           </p>
-          <div className="flex items-center gap-2.5">
+
+          <label className="mb-2 flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-[var(--color-ink-2)]">
+            <input
+              type="checkbox"
+              checked={includeLlama}
+              onChange={() => setIncludeLlama((v) => !v)}
+              className="h-3.5 w-3.5 rounded accent-indigo-500"
+            />
             <span
               className="inline-block h-2 w-2 rounded-full shrink-0"
               style={{ background: "var(--color-gemini)" }}
             />
-            <span className="text-[13px] font-medium text-[var(--color-fg)]">
-              Llama 3.3 · Groq
+            <span className="text-[13px] text-[var(--color-fg)]">
+              gpt-oss 120B · Groq
             </span>
             <span className="ml-auto rounded-md bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] text-emerald-500 dark:text-emerald-400">
               free
             </span>
-          </div>
-        </div>
-
-        {/* Compare with */}
-        <div className="px-5 py-4">
-          <p className="mb-3 font-mono text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">
-            Also compare with
-          </p>
+          </label>
 
           {savedModels.length === 0 ? (
             <p className="mb-3 text-[12px] text-[var(--color-text-muted)]">
@@ -1329,8 +1452,9 @@ function BeforeSearchModal({
           </button>
           <button
             type="button"
-            onClick={() => onConfirm(selectedIds)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-500 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-indigo-400"
+            onClick={() => onConfirm(selectedIds, includeLlama)}
+            disabled={!canSearch}
+            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-500 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Search →
           </button>
