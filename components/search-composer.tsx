@@ -60,7 +60,7 @@ export function SearchComposer({
         <div className="flex items-center gap-1.5 border-t border-[var(--color-border)] px-2 py-1.5">
           <Sparkles className="h-3 w-3 shrink-0 text-indigo-400" strokeWidth={1.75} />
           <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[var(--color-text-muted)]">
-            Claude · GPT · Gemini · Llama
+            Claude · GPT · Gemini · gpt-oss
           </span>
           {onAddModel && (
             <button
@@ -87,7 +87,7 @@ export function SearchComposer({
         <div className="flex items-center justify-between border-t border-[var(--color-border)] px-3 py-2">
           <div className="flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
             <Sparkles className="h-3 w-3 text-indigo-400" strokeWidth={1.75} />
-            <span className="font-mono">Claude · GPT · Gemini · Llama</span>
+            <span className="font-mono">Claude · GPT · Gemini · gpt-oss</span>
             {onAddModel && (
               <button
                 type="button"

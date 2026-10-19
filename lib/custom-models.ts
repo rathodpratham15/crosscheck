@@ -41,10 +41,9 @@ export const PROVIDER_SUGGESTIONS: Record<SupportedProvider, string[]> = {
     "claude-haiku-4-5-20251001",
   ],
   groq: [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "mixtral-8x7b-32768",
-    "gemma2-9b-it",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
   ],
   mistral: [
     "mistral-large-latest",

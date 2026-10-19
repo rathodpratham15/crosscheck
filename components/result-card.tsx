@@ -28,7 +28,7 @@ const MODEL_ACCENT: Record<"claude" | "gpt" | "gemini" | "google", string> = {
 const MODEL_LABEL: Record<"claude" | "gpt" | "gemini" | "google", string> = {
   claude: "Claude Sonnet",
   gpt: "GPT-4o mini",
-  gemini: "Llama 3.3 · Groq",
+  gemini: "gpt-oss 120B · Groq",
   google: "Gemini 1.5 Pro",
 };
 
